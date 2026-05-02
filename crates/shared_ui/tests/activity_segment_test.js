@@ -320,6 +320,8 @@ var singleSeg = {
 html = as.renderSegmentCard(singleSeg, 1);
 assert(html.indexOf('act-edit') >= 0, 'single: has act-edit');
 assert(html.indexOf('toggleActDetail') < 0, 'single: no toggle');
+assert(html.indexOf('act-detail-inline') >= 0, 'single: shows inline detail');
+assert(html.indexOf('a.rs') >= 0, 'single: preview is visible');
 
 // ============================================================
 // renderSegmentDetail — 展开详情

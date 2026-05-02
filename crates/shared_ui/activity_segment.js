@@ -265,6 +265,7 @@ function renderSegmentCard(seg, idx) {
   var catClass = seg.type === 'explore' ? 'act-explore' : (seg.type === 'edit' ? 'act-edit' : 'act-tool');
   var itemCount = seg.items ? seg.items.length : 0;
   var expandable = itemCount > 1;
+  var showInlineDetail = itemCount === 1 && !!seg.items[0].tool_input_preview;
   var idxStr = String(idx);
 
   var html = '<div class="act-card ' + catClass + '" data-act-idx="' + escHtml(idxStr) + '">';
@@ -277,7 +278,14 @@ function renderSegmentCard(seg, idx) {
   }
   html += '</div>';
 
-  // 展开详情（初始隐藏）
+  // 单个工具段直接展示预览，避免手机端只能看到“1 命令”而看不到命令内容。
+  if (showInlineDetail) {
+    html += '<div class="act-detail act-detail-inline">';
+    html += renderSegmentDetail(seg);
+    html += '</div>';
+  }
+
+  // 多个工具段初始隐藏，点击摘要行展开。
   if (expandable) {
     html += '<div class="act-detail" id="act-detail-' + escHtml(idxStr) + '">';
     html += renderSegmentDetail(seg);

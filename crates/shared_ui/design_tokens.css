@@ -1,4 +1,4 @@
-/* design_tokens.css — Apple-inspired design tokens for Checkpoint
+/* design_tokens.css — Apple-inspired design tokens for Agent Aspect
  *
  * 设计方向：工具型控制台，不是营销页。
  * 高级、克制、信息清楚、手机/桌面一致。
@@ -174,6 +174,7 @@
 .act-turn-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-8);
   padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-sm);
@@ -189,7 +190,7 @@
 .act-turn.act-running .act-turn-bar:hover { background: var(--surface); }
 
 .act-turn-label { font-weight: 500; color: var(--dim); }
-.act-turn-tools { font-size: var(--text-caption1); color: var(--text-tertiary); margin-left: auto; }
+.act-turn-tools { font-size: var(--text-caption1); color: var(--text-tertiary); margin-left: auto; white-space: nowrap; }
 .act-turn-chevron { font-size: 10px; color: var(--text-tertiary); }
 
 .act-pulse {
@@ -219,21 +220,23 @@
 
 .act-summary {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-4);
   cursor: pointer;
   user-select: none;
   color: var(--text-secondary);
 }
 .act-summary:hover { color: var(--text); }
-.act-summary-text { flex: 1; }
+.act-summary-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .act-chevron { font-size: 10px; color: var(--text-tertiary); transition: transform var(--duration-fast) var(--ease-default); }
 
 .act-detail { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.act-detail-inline { display: block; }
 
 .act-item {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: var(--space-4);
   padding: 2px 0;
   font-size: var(--text-caption1);
@@ -245,11 +248,14 @@
   min-width: 36px;
 }
 .act-item-preview {
+  flex: 1 1 160px;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--text-caption2);
   color: var(--text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   max-width: 100%;
 }
