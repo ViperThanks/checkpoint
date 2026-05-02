@@ -1,6 +1,6 @@
 //! 配置管理 — TOML 配置的加载、保存和默认值。
 //!
-//! 配置文件位于 `~/.checkpoint/config.toml`，首次运行自动生成。
+//! 配置文件位于 `~/.agent-aspect/config.toml`（旧安装可能沿用 `~/.checkpoint/`）。
 //! 所有字段都有 serde default，保证向后兼容新增字段。
 
 use crate::error::CheckpointResult;

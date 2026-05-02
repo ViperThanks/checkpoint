@@ -97,6 +97,7 @@ agent-aspect bridge pair
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RELAY_LISTEN_ADDR` | `0.0.0.0:8080` | Address and port the relay listens on |
+| `RELAY_LISTEN_PORT` | `8080` | Host port mapped to the container port (Docker only) |
 | `RELAY_SECRET` | (auto-generated) | HMAC signing key. Override to use a specific secret. |
 | `RELAY_SETUP_TOKEN` | (auto-generated) | Registration token. Override to use a specific token. |
 

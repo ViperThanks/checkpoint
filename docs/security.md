@@ -18,7 +18,7 @@
 - Token-protected HTTP server on `127.0.0.1:7676` by default.
 - All endpoints require Bearer token auth except `GET /health`.
 - Token is generated locally via `getrandom` (cryptographically secure) and stored at `~/.agent-aspect/bridge.token`.
-- CORS is disabled by default. No cross-origin requests are accepted unless you explicitly enable it.
+- CORS is disabled. No cross-origin requests are accepted.
 
 ### Relay (`agent-aspect-relay`)
 

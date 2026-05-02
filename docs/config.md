@@ -155,7 +155,7 @@ Permission passthrough fields are currently verified for Claude Code only. Other
 | `AGENT_ASPECT_MODE` | Override enforcement mode (daemon) |
 | `AGENT_ASPECT_AGENT` | Override agent detection (for testing) |
 | `AGENT_ASPECT_ASSUME_NO_TTY` | Disable TTY prompts in hook-cli (non-interactive environments) |
-| `VIBE_ISLAND_SKIP` | Skip Vibe Island permission hook (fallback fix) |
+| `AGENT_ASPECT_SKIP_PERMISSION_HOOK` | Internal: injected by bridge into provider subprocesses when bypass-permissions mode is active |
 
 ## Example Config
 

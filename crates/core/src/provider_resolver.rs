@@ -107,7 +107,7 @@ impl ProviderResolver {
         Err(format!(
             "binary '{}' not found in PATH or fallback directories. \
              Searched fallback: {}. \
-             Hint: configure provider_binaries.{} in ~/.checkpoint/config.toml \
+             Hint: configure provider_binaries.{} in ~/.agent-aspect/config.toml \
              or ensure the binary directory is visible to checkpoint-bridge",
             binary_name,
             searched.join(", "),

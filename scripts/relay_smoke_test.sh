@@ -398,7 +398,8 @@ done
 if [ "$RATE_HIT" -eq 1 ]; then
     echo "PASS: rate limit triggered"
 else
-    echo "WARN: rate limit not hit within 12 attempts (may be timing-dependent)"
+    echo "FAIL: rate limit not hit within 12 attempts"
+    FAILED=1
 fi
 
 # Cleanup
