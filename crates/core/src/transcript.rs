@@ -842,8 +842,12 @@ pub fn parse_kimi_line(line: &str) -> Result<Vec<TranscriptMessage>, String> {
 fn format_tool_summary(tool_name: &str, input: &serde_json::Value) -> String {
     let obj = input.as_object();
     match tool_name {
-        "Read" | "ReadFile" => obj
-            .and_then(|o| o.get("file_path").and_then(|v| v.as_str()))
+        "Read" | "ReadFile" | "read_file" => obj
+            .and_then(|o| {
+                o.get("file_path")
+                    .or_else(|| o.get("path"))
+                    .and_then(|v| v.as_str())
+            })
             .map(|s| s.to_string())
             .unwrap_or_default(),
         "Grep" => {
@@ -863,17 +867,25 @@ fn format_tool_summary(tool_name: &str, input: &serde_json::Value) -> String {
             .and_then(|o| o.get("pattern").and_then(|v| v.as_str()))
             .map(|s| s.to_string())
             .unwrap_or_default(),
-        "Bash" | "shell" | "Shell" => obj
+        "Bash" | "shell" | "Shell" | "exec_command" | "write_stdin" | "run_shell_command" => obj
             .and_then(|o| o.get("command").and_then(|v| v.as_str()))
             .map(|s| s.to_string())
             .unwrap_or_default(),
-        "Write" | "Edit" | "StrReplaceFile" => obj
-            .and_then(|o| o.get("file_path").and_then(|v| v.as_str()))
+        "Write" | "Edit" | "StrReplaceFile" | "WriteFile" | "write_file" | "ApplyPatch" => obj
+            .and_then(|o| {
+                o.get("file_path")
+                    .or_else(|| o.get("path"))
+                    .and_then(|v| v.as_str())
+            })
             .map(|s| s.to_string())
             .unwrap_or_default(),
         "LS" | "List" => obj
             .and_then(|o| o.get("path").and_then(|v| v.as_str()))
             .or_else(|| obj.and_then(|o| o.get("directory").and_then(|v| v.as_str())))
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        "NotebookEdit" => obj
+            .and_then(|o| o.get("notebook_path").and_then(|v| v.as_str()))
             .map(|s| s.to_string())
             .unwrap_or_default(),
         _ => truncate_str(

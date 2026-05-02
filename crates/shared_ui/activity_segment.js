@@ -31,6 +31,7 @@ if (typeof module !== 'undefined' && module.exports) {
  * edit 只包含文件修改操作。
  */
 var TOOL_MAP = {
+  // Claude Code
   'Read':           ['explore', 'file'],
   'LS':             ['explore', 'file'],
   'LSP':            ['explore', 'file'],
@@ -40,14 +41,23 @@ var TOOL_MAP = {
   'WebSearch':      ['explore', 'search'],
   'Bash':           ['explore', 'command'],
   'Shell':          ['explore', 'command'],
-  'exec_command':   ['explore', 'command'],
-  'write_stdin':    ['explore', 'command'],
   'Edit':           ['edit', 'file'],
   'Write':          ['edit', 'file'],
+  'NotebookEdit':   ['edit', 'file'],
+  // Codex CLI
+  'exec_command':   ['explore', 'command'],
+  'write_stdin':    ['explore', 'command'],
+  'ReadFile':       ['explore', 'file'],
+  'List':           ['explore', 'file'],
+  'web_search':     ['explore', 'search'],
+  'ApplyPatch':     ['edit', 'file'],
+  // Kimi Code
   'WriteFile':      ['edit', 'file'],
   'StrReplaceFile': ['edit', 'file'],
-  'NotebookEdit':   ['edit', 'file'],
-  'ApplyPatch':     ['edit', 'file'],
+  // Gemini CLI
+  'read_file':      ['explore', 'file'],
+  'write_file':     ['edit', 'file'],
+  'run_shell_command': ['explore', 'command'],
 };
 
 /**
@@ -153,18 +163,13 @@ function _finalizeSeg(p) {
 
   if (p.category === 'explore') {
     var parts = [];
-    if (c.file > 0) parts.push(c.file + ' 文件');
-    if (c.search > 0) parts.push(c.search + ' 搜索');
-    if (c.command > 0) {
-      if (!c.file && !c.search) {
-        parts.push('Ran ' + c.command + ' command' + (c.command === 1 ? '' : 's'));
-      } else {
-        parts.push(c.command + ' 命令');
-      }
-    }
-    summary = parts.length ? parts.join(' · ') : '探索';
+    if (c.file > 0) parts.push(c.file + (c.file === 1 ? ' file' : ' files'));
+    if (c.search > 0) parts.push(c.search + (c.search === 1 ? ' search' : ' searches'));
+    if (c.command > 0) parts.push(c.command + (c.command === 1 ? ' command' : ' commands'));
+    summary = parts.length ? parts.join(' · ') : 'explored';
   } else if (p.category === 'edit') {
-    summary = (c.edit || c.file || p.items.length) + ' 文件编辑';
+    var editCount = c.edit || c.file || p.items.length;
+    summary = editCount + (editCount === 1 ? ' edit' : ' edits');
   }
 
   return {

@@ -41,6 +41,17 @@ assert(as.classifyTool('UnknownTool') === null, 'Unknown → null');
 assert(as.classifyTool('TodoRead') === null, 'TodoRead → null');
 assert(as.classifyTool('TodoWrite') === null, 'TodoWrite → null');
 
+// Gemini tools
+assert(as.classifyTool('read_file').category === 'explore', 'read_file → explore');
+assert(as.classifyTool('read_file').subcategory === 'file', 'read_file → file');
+assert(as.classifyTool('write_file').category === 'edit', 'write_file → edit');
+assert(as.classifyTool('run_shell_command').category === 'explore', 'run_shell_command → explore');
+assert(as.classifyTool('run_shell_command').subcategory === 'command', 'run_shell_command → command');
+// Codex tools
+assert(as.classifyTool('ReadFile').category === 'explore', 'ReadFile → explore');
+assert(as.classifyTool('web_search').category === 'explore', 'web_search → explore');
+assert(as.classifyTool('web_search').subcategory === 'search', 'web_search → search');
+
 // ============================================================
 // formatDuration
 // ============================================================
@@ -103,8 +114,8 @@ assertEq(segs[1].items.length, 3);
 assertEq(segs[1].fileCount, 2, '2 file reads');
 assertEq(segs[1].searchCount, 1, '1 grep search');
 assertEq(segs[1].commandCount, 0);
-assert(segs[1].summary.indexOf('2 文件') >= 0, 'summary has 2 files');
-assert(segs[1].summary.indexOf('1 搜索') >= 0, 'summary has 1 search');
+assert(segs[1].summary.indexOf('2 files') >= 0, 'summary has 2 files');
+assert(segs[1].summary.indexOf('1 search') >= 0, 'summary has 1 search');
 assertEq(segs[2].type, 'assistant');
 
 // ============================================================
@@ -145,9 +156,9 @@ assertEq(segs[0].items.length, 3);
 assertEq(segs[0].fileCount, 1, '1 file read');
 assertEq(segs[0].commandCount, 1, '1 bash command');
 assertEq(segs[0].searchCount, 1, '1 grep');
-assert(segs[0].summary.indexOf('1 文件') >= 0, 'summary: 1 file');
-assert(segs[0].summary.indexOf('1 命令') >= 0, 'summary: 1 command');
-assert(segs[0].summary.indexOf('1 搜索') >= 0, 'summary: 1 search');
+assert(segs[0].summary.indexOf('1 file') >= 0, 'summary: 1 file');
+assert(segs[0].summary.indexOf('1 command') >= 0, 'summary: 1 command');
+assert(segs[0].summary.indexOf('1 search') >= 0, 'summary: 1 search');
 assertEq(segs[0].duration, 6000, '6s duration');
 
 // ============================================================
@@ -164,7 +175,7 @@ assertEq(segs.length, 1);
 assertEq(segs[0].type, 'edit');
 assertEq(segs[0].items.length, 2);
 assertEq(segs[0].editCount, 2);
-assert(segs[0].summary.indexOf('2 文件编辑') >= 0, 'edit summary');
+assert(segs[0].summary.indexOf('2 edits') >= 0, 'edit summary');
 
 // ============================================================
 // buildSegments — 未知工具单独通过
@@ -200,9 +211,9 @@ assertEq(segs[0].type, 'user');
 assertEq(segs[1].type, 'assistant');
 assertEq(segs[2].type, 'explore');
 assertEq(segs[2].items.length, 3);
-assert(segs[2].summary.indexOf('1 文件') >= 0, 'full: 1 file');
-assert(segs[2].summary.indexOf('1 搜索') >= 0, 'full: 1 search');
-assert(segs[2].summary.indexOf('1 命令') >= 0, 'full: 1 command');
+assert(segs[2].summary.indexOf('1 file') >= 0, 'full: 1 file');
+assert(segs[2].summary.indexOf('1 search') >= 0, 'full: 1 search');
+assert(segs[2].summary.indexOf('1 command') >= 0, 'full: 1 command');
 assertEq(segs[3].type, 'edit');
 assertEq(segs[3].items.length, 1);
 assertEq(segs[4].type, 'assistant');
@@ -299,14 +310,14 @@ var cardSeg = {
     { tool_name: 'Read', tool_input_preview: 'a.rs' },
     { tool_name: 'Grep', tool_input_preview: '"TODO"' },
   ],
-  summary: '2 文件 · 1 搜索',
+  summary: '2 files · 1 search',
   startTime: null, endTime: null, duration: 0,
   fileCount: 2, searchCount: 1, commandCount: 0, editCount: 0,
 };
 var html = as.renderSegmentCard(cardSeg, 0);
 assert(html.indexOf('act-card') >= 0, 'has act-card class');
 assert(html.indexOf('act-explore') >= 0, 'has act-explore class');
-assert(html.indexOf('2 文件') >= 0, 'summary text in HTML');
+assert(html.indexOf('2 files') >= 0, 'summary text in HTML');
 assert(html.indexOf('toggleActDetail') >= 0, 'has toggle for 2+ items');
 assert(html.indexOf('toggleActDetail(this)') >= 0, 'segment toggle is element-local');
 assert(html.indexOf('act-detail') >= 0, 'has detail div');
@@ -315,7 +326,7 @@ assert(html.indexOf('act-detail') >= 0, 'has detail div');
 var singleSeg = {
   type: 'edit',
   items: [{ tool_name: 'Edit', tool_input_preview: 'a.rs' }],
-  summary: '1 文件编辑',
+  summary: '1 edit',
   startTime: null, endTime: null, duration: 0,
   fileCount: 0, searchCount: 0, commandCount: 0, editCount: 1,
 };
@@ -415,7 +426,7 @@ var codexCmdSegs = as.buildSegments([
 ]);
 assertEq(codexCmdSegs.length, 1, 'Codex command tools merge');
 assertEq(codexCmdSegs[0].commandCount, 2, 'Codex command count');
-assert(codexCmdSegs[0].summary.indexOf('Ran 2 commands') >= 0, 'Codex summary uses Ran 2 commands');
+assert(codexCmdSegs[0].summary.indexOf('2 commands') >= 0, 'Codex summary uses 2 commands');
 
 // ============================================================
 // 长序列合并

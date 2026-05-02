@@ -704,7 +704,7 @@ function buildActivityHtml(messages) {
         if (!turnOpened && toolSegs.length > 0) {
           html += '<div class="act-turn act-settled">';
           html += '<div class="act-turn-bar" onclick="toggleTurnBody(this)">';
-          html += '<span class="act-turn-label">Worked for ' + formatDuration(group.duration || 1) + '</span>';
+          html += '<span class="act-turn-label">Worked for ' + escHtml(formatDuration(group.duration || 1)) + '</span>';
           html += '<span class="act-turn-tools">Ran ' + group.toolCount + ' command' + (group.toolCount === 1 ? '' : 's') + '</span>';
           html += '<span class="act-turn-chevron" id="act-turn-chevron-t' + g + '">&#x25B8;</span>';
           html += '</div>';
