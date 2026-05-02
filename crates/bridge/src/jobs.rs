@@ -309,12 +309,15 @@ impl JobRunner {
                 if let Ok(Some(conv)) = store.get_conversation(&db_id) {
                     let tokens = conv.cached_token_count.unwrap_or(conv.token_count);
                     let file_size = conv.cached_file_size_bytes.unwrap_or(conv.file_size_bytes);
+                    let messages = conv.event_count;
                     use checkpoint_core::constants::*;
-                    let is_critical =
-                        tokens >= RESUME_TOKEN_CRITICAL || file_size >= RESUME_FILE_SIZE_CRITICAL;
+                    let is_critical = tokens >= RESUME_TOKEN_CRITICAL
+                        || file_size >= RESUME_FILE_SIZE_CRITICAL
+                        || messages >= RESUME_MESSAGE_CRITICAL;
                     let is_warning = !is_critical
                         && (tokens >= RESUME_TOKEN_WARNING
-                            || file_size >= RESUME_FILE_SIZE_WARNING);
+                            || file_size >= RESUME_FILE_SIZE_WARNING
+                            || messages >= RESUME_MESSAGE_WARNING);
 
                     let cost_status = if is_critical {
                         "critical"
@@ -327,12 +330,14 @@ impl JobRunner {
                     let stats = serde_json::json!({
                         "token_count": tokens,
                         "file_size_bytes": file_size,
-                        "event_count": conv.event_count,
+                        "event_count": messages,
                         "thresholds": {
                             "token_warning": RESUME_TOKEN_WARNING,
                             "token_critical": RESUME_TOKEN_CRITICAL,
                             "file_size_warning": RESUME_FILE_SIZE_WARNING,
                             "file_size_critical": RESUME_FILE_SIZE_CRITICAL,
+                            "message_warning": RESUME_MESSAGE_WARNING,
+                            "message_critical": RESUME_MESSAGE_CRITICAL,
                         }
                     });
 
@@ -399,7 +404,7 @@ impl JobRunner {
                 .insert_job_log(&job_id, "system", "Prompt recorded. Remote execution not yet implemented — stored for future use.", 0, &now2)
                 .map_err(|e| SubmitError::Fatal(format!("log: {e}")))?;
             store
-                .update_job_finished(&job_id, "succeeded", &now2, Some(0))
+                .update_job_finished_with_completed_reason(&job_id, "succeeded", &now2, Some(0), None, Some("process_exit"))
                 .map_err(|e| SubmitError::Fatal(format!("mark finished: {e}")))?;
 
             return Ok(job_id);
@@ -990,12 +995,13 @@ fn exec_job(
                  hint: Configure provider_binaries.<name> in ~/.agent-aspect/config.toml \
                  or ensure the binary directory is visible to agent-aspect-bridge"
             );
-            let _ = store.update_job_finished_with_reason(
+            let _ = store.update_job_finished_with_completed_reason(
                 job_id,
                 "failed",
                 &now,
                 None,
                 Some("spawn failed"),
+                Some("process_exit_nonzero"),
             );
             let _ = store.insert_job_log(job_id, "system", &err_msg, 0, &now);
             // Broadcast job_status on spawn failure
@@ -1216,7 +1222,7 @@ fn exec_job(
     // Check if cancel already wrote a terminal state — status guard prevents overwrite
     let now = chrono::Utc::now().to_rfc3339();
     if timed_out {
-        let _ = store.update_job_finished_with_reason(
+        let _ = store.update_job_finished_with_completed_reason(
             job_id,
             "failed",
             &now,
@@ -1224,6 +1230,7 @@ fn exec_job(
             Some(&format!(
                 "idle timeout after {timeout_secs}s without output (source: {termination_source})"
             )),
+            Some("timeout_killed"),
         );
     } else if let Some(status) = exit_status {
         let code = status.code();
@@ -1237,15 +1244,21 @@ fn exec_job(
         } else {
             Some("process exited with non-zero status")
         };
-        let _ = store.update_job_finished_with_reason(job_id, final_status, &now, code, reason);
+        let completed_reason = if status.success() {
+            "process_exit"
+        } else {
+            "process_exit_nonzero"
+        };
+        let _ = store.update_job_finished_with_completed_reason(job_id, final_status, &now, code, reason, Some(completed_reason));
     } else {
         // Child exited without status (e.g. killed by cancel) — let DB status guard handle it
-        let _ = store.update_job_finished_with_reason(
+        let _ = store.update_job_finished_with_completed_reason(
             job_id,
             "failed",
             &now,
             None,
             Some("process ended without exit status"),
+            Some("timeout_killed"),
         );
     }
 

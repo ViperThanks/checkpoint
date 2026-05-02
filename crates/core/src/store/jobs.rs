@@ -28,6 +28,7 @@ pub struct JobRow {
     pub timeout_secs: Option<i64>,
     pub failure_reason: Option<String>,
     pub last_log_at: Option<String>,
+    pub completed_reason: Option<String>,
 }
 
 /// 任务日志行 — stdout/stderr/system 流的逐块记录。
@@ -63,6 +64,7 @@ impl AuditStore {
             timeout_secs: row.get(16)?,
             failure_reason: row.get(17)?,
             last_log_at: row.get(18)?,
+            completed_reason: row.get(19)?,
         })
     }
 
@@ -158,6 +160,19 @@ impl AuditStore {
         exit_code: Option<i32>,
         failure_reason: Option<&str>,
     ) -> CheckpointResult<()> {
+        self.update_job_finished_with_completed_reason(id, status, finished_at, exit_code, failure_reason, None)
+    }
+
+    /// 写入 job 终态，包含结构化 completed_reason（process_exit / timeout_killed / cancelled / bridge_restart）。
+    pub fn update_job_finished_with_completed_reason(
+        &self,
+        id: &str,
+        status: &str,
+        finished_at: &str,
+        exit_code: Option<i32>,
+        failure_reason: Option<&str>,
+        completed_reason: Option<&str>,
+    ) -> CheckpointResult<()> {
         self.conn
             .execute(
                 "UPDATE jobs SET
@@ -165,9 +180,10 @@ impl AuditStore {
                      finished_at = ?2,
                      exit_code = ?3,
                      failure_reason = COALESCE(?5, failure_reason),
+                     completed_reason = COALESCE(?6, completed_reason),
                      heartbeat_at = ?2
                  WHERE id = ?4 AND status IN ('running', 'queued', 'observing')",
-                rusqlite::params![status, finished_at, exit_code, id, failure_reason],
+                rusqlite::params![status, finished_at, exit_code, id, failure_reason, completed_reason],
             )
             .map_err(CheckpointError::UpdateJob)?;
         Ok(())
@@ -205,6 +221,7 @@ impl AuditStore {
                      status = 'cancelled',
                      finished_at = ?2,
                      failure_reason = COALESCE(?3, failure_reason),
+                     completed_reason = 'cancelled',
                      heartbeat_at = ?2
                  WHERE id = ?1 AND status IN ('running', 'queued', 'observing')",
                 rusqlite::params![id, now, reason],
@@ -291,6 +308,7 @@ impl AuditStore {
                          status = 'failed',
                          finished_at = ?2,
                          failure_reason = ?3,
+                         completed_reason = 'bridge_restart',
                          heartbeat_at = ?2
                      WHERE id = ?1 AND status IN ('queued', 'running', 'observing')",
                     rusqlite::params![job.id, timestamp, reason],
@@ -313,7 +331,8 @@ impl AuditStore {
             .prepare(
                 "SELECT id, kind, input, status, created_at, started_at, finished_at, exit_code,
                     provider, project_path, conversation_id, prompt, pid, process_group_id,
-                    runner_id, heartbeat_at, timeout_secs, failure_reason, last_log_at
+                    runner_id, heartbeat_at, timeout_secs, failure_reason, last_log_at,
+                    completed_reason
              FROM jobs
              WHERE status IN ('queued', 'running', 'observing') AND (runner_id IS NULL OR runner_id != ?1)
              ORDER BY created_at ASC",
@@ -355,7 +374,8 @@ impl AuditStore {
             .query_row(
                 "SELECT id, kind, input, status, created_at, started_at, finished_at, exit_code,
                         provider, project_path, conversation_id, prompt, pid, process_group_id,
-                        runner_id, heartbeat_at, timeout_secs, failure_reason, last_log_at
+                        runner_id, heartbeat_at, timeout_secs, failure_reason, last_log_at,
+                        completed_reason
                  FROM jobs WHERE id = ?1",
                 rusqlite::params![id],
                 Self::map_job_row,
@@ -376,7 +396,8 @@ impl AuditStore {
         let mut sql = String::from(
             "SELECT id, kind, input, status, created_at, started_at, finished_at, exit_code,
                     provider, project_path, conversation_id, prompt, pid, process_group_id,
-                    runner_id, heartbeat_at, timeout_secs, failure_reason, last_log_at FROM jobs",
+                    runner_id, heartbeat_at, timeout_secs, failure_reason, last_log_at,
+                    completed_reason FROM jobs",
         );
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         if let Some(s) = status_filter {

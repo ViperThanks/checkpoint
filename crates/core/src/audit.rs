@@ -191,6 +191,7 @@ impl AuditStore {
         self.migrate_v9_devices()?;
         self.migrate_v10_conversation_messages()?;
         self.migrate_v11_runtime_identity()?;
+        self.migrate_v12_job_completed_reason()?;
         self.conn
             .execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_conv_agent ON events(conversation_id, agent)",
@@ -419,6 +420,18 @@ impl AuditStore {
         Ok(())
     }
 
+    /// v12: jobs 表新增 completed_reason 结构化完成原因。
+    ///
+    /// 值：process_exit / process_exit_nonzero / timeout_killed / cancelled / bridge_restart / NULL。
+    /// 与 failure_reason 并存：failure_reason 是自由文本（向后兼容），completed_reason 是枚举值（便于查询）。
+    fn migrate_v12_job_completed_reason(&self) -> CheckpointResult<()> {
+        if !self.column_exists("jobs", "completed_reason")? {
+            self.conn
+                .execute("ALTER TABLE jobs ADD COLUMN completed_reason TEXT", [])
+                .map_err(CheckpointError::MigrateConversationSchema)?;
+        }
+        Ok(())
+    }
     /// 遗留迁移：将 decisions 表从 event_id 主键改为自增 id 主键，
     /// 以支持同一 event 的多次决策（覆盖场景）。
     fn migrate_legacy_decisions_schema(&self) -> CheckpointResult<()> {
