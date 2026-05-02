@@ -6,7 +6,7 @@
 // 核心概念：
 // - Segment：一组连续同类工具事件的合并
 // - Turn：两个用户消息之间的所有活动（assistant + tools）
-// - 完成态："工作了 Xm Ys" 折叠
+// - 完成态："Worked for Xm Ys" 折叠
 // - 运行中态：实时累积摘要 + 脉冲指示
 //
 // 依赖：view_model.js (escHtml, jsStr)
@@ -40,6 +40,8 @@ var TOOL_MAP = {
   'WebSearch':      ['explore', 'search'],
   'Bash':           ['explore', 'command'],
   'Shell':          ['explore', 'command'],
+  'exec_command':   ['explore', 'command'],
+  'write_stdin':    ['explore', 'command'],
   'Edit':           ['edit', 'file'],
   'Write':          ['edit', 'file'],
   'WriteFile':      ['edit', 'file'],
@@ -117,7 +119,6 @@ function buildSegments(messages) {
     var info = classifyTool(m.tool_name);
     if (!info) {
       // 未知/内部工具 — 单独通过
-      if (pending) { segments.push(_finalizeSeg(pending)); pending = null; }
       segments.push(_singleToolSeg(m));
       continue;
     }
@@ -154,7 +155,13 @@ function _finalizeSeg(p) {
     var parts = [];
     if (c.file > 0) parts.push(c.file + ' 文件');
     if (c.search > 0) parts.push(c.search + ' 搜索');
-    if (c.command > 0) parts.push(c.command + ' 命令');
+    if (c.command > 0) {
+      if (!c.file && !c.search) {
+        parts.push('Ran ' + c.command + ' command' + (c.command === 1 ? '' : 's'));
+      } else {
+        parts.push(c.command + ' 命令');
+      }
+    }
     summary = parts.length ? parts.join(' · ') : '探索';
   } else if (p.category === 'edit') {
     summary = (c.edit || c.file || p.items.length) + ' 文件编辑';
@@ -264,8 +271,7 @@ function renderSegmentCard(seg, idx) {
   if (seg.type === 'user' || seg.type === 'assistant') return '';
   var catClass = seg.type === 'explore' ? 'act-explore' : (seg.type === 'edit' ? 'act-edit' : 'act-tool');
   var itemCount = seg.items ? seg.items.length : 0;
-  var expandable = itemCount > 1;
-  var showInlineDetail = itemCount === 1 && !!seg.items[0].tool_input_preview;
+  var expandable = itemCount > 0;
   var idxStr = String(idx);
 
   var html = '<div class="act-card ' + catClass + '" data-act-idx="' + escHtml(idxStr) + '">';
@@ -278,16 +284,9 @@ function renderSegmentCard(seg, idx) {
   }
   html += '</div>';
 
-  // 单个工具段直接展示预览，避免手机端只能看到“1 命令”而看不到命令内容。
-  if (showInlineDetail) {
-    html += '<div class="act-detail act-detail-inline">';
-    html += renderSegmentDetail(seg);
-    html += '</div>';
-  }
-
-  // 多个工具段初始隐藏，点击摘要行展开。
+  // 工具段默认压缩，点击摘要行展开详情；单个命令也保持同一交互模型。
   if (expandable) {
-    html += '<div class="act-detail" id="act-detail-' + escHtml(idxStr) + '">';
+    html += '<div class="act-detail" id="act-detail-' + escHtml(idxStr) + '" style="display:none">';
     html += renderSegmentDetail(seg);
     html += '</div>';
   }
@@ -322,8 +321,8 @@ function renderSegmentDetail(seg) {
 
 /**
  * 渲染 Turn 组的标题栏。
- * 完成态："工作了 3m 21s" + 工具数量 + 折叠切换
- * 运行中态：脉冲指示 + "进行中" + 当前耗时
+ * 完成态："Worked for 3m 21s" + 工具数量 + 折叠切换
+ * 运行中态：脉冲指示 + "Working" + 当前耗时
  *
  * @param {TurnGroup} group
  * @param {number} idx - turn 索引
@@ -340,15 +339,13 @@ function renderTurnBanner(group, idx) {
 
   if (group.isRunning) {
     html += '<span class="act-pulse"></span>';
-    html += '<span class="act-turn-label">进行中 ' + escHtml(formatDuration(group.duration)) + '</span>';
-  } else if (group.duration > 0) {
-    html += '<span class="act-turn-label">工作了 ' + escHtml(formatDuration(group.duration)) + '</span>';
+    html += '<span class="act-turn-label">Working ' + escHtml(formatDuration(group.duration || 1)) + '</span>';
   } else {
-    html += '<span class="act-turn-label">完成</span>';
+    html += '<span class="act-turn-label">Worked for ' + escHtml(formatDuration(group.duration || 1)) + '</span>';
   }
 
   if (group.toolCount > 0) {
-    html += '<span class="act-turn-tools">' + group.toolCount + ' 次操作</span>';
+    html += '<span class="act-turn-tools">Ran ' + group.toolCount + ' command' + (group.toolCount === 1 ? '' : 's') + '</span>';
   }
 
   if (!group.isRunning && group.toolCount > 0) {

@@ -760,21 +760,51 @@ function renderConvMessageList(id, total, keepScroll) {
 
 /**
  * 使用 activity_segment.js 将消息分组并渲染。
- * 手机端简化版：工具段合并为卡片，无 turn banner。
+ * 手机端与桌面端一致：每轮显示 Worked for，工具默认折叠，点击后看详情。
  */
 function buildRelayActivityHtml(messages) {
   if (!messages || !messages.length) return '';
   var segments = buildSegments(messages);
+  var groups = buildTurnGroups(segments, false);
   var html = '';
   var cardIdx = 0;
-  for (var i = 0; i < segments.length; i++) {
-    var seg = segments[i];
-    if (seg.type === 'user' || seg.type === 'assistant') {
-      html += buildConvMessageHtml(seg.message);
-    } else {
-      html += renderSegmentCard(seg, 'r' + cardIdx);
-      cardIdx++;
+
+  for (var g = 0; g < groups.length; g++) {
+    var group = groups[g];
+    if (group.userSeg) html += buildConvMessageHtml(group.userSeg.message);
+
+    var toolSegs = [];
+    for (var s = 0; s < group.segments.length; s++) {
+      if (group.segments[s].type !== 'user' && group.segments[s].type !== 'assistant') {
+        toolSegs.push(group.segments[s]);
+      }
     }
+
+    var turnOpened = false;
+    for (var i = 0; i < group.segments.length; i++) {
+      var seg = group.segments[i];
+      if (seg.type === 'assistant') {
+        if (turnOpened) { html += '</div></div>'; turnOpened = false; }
+        html += buildConvMessageHtml(seg.message);
+      } else if (seg.type === 'user') {
+        continue;
+      } else {
+        if (!turnOpened && toolSegs.length > 0) {
+          html += '<div class="act-turn act-settled">';
+          html += '<div class="act-turn-bar" onclick="toggleTurnBody(this)">';
+          html += '<span class="act-turn-label">Worked for ' + escHtml(formatDuration(group.duration || 1)) + '</span>';
+          html += '<span class="act-turn-tools">Ran ' + group.toolCount + ' command' + (group.toolCount === 1 ? '' : 's') + '</span>';
+          html += '<span class="act-turn-chevron" id="act-turn-chevron-r' + g + '">&#x25B8;</span>';
+          html += '</div>';
+          html += '<div class="act-turn-body" id="act-turn-body-r' + g + '" style="display:none">';
+          turnOpened = true;
+        }
+        html += renderSegmentCard(seg, 'r' + cardIdx);
+        cardIdx++;
+      }
+    }
+
+    if (turnOpened) { html += '</div></div>'; }
   }
   return html;
 }

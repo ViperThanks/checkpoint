@@ -28,6 +28,8 @@ assert(as.classifyTool('Grep').category === 'explore', 'Grep → explore');
 assert(as.classifyTool('Grep').subcategory === 'search', 'Grep → search');
 assert(as.classifyTool('Bash').category === 'explore', 'Bash → explore');
 assert(as.classifyTool('Bash').subcategory === 'command', 'Bash → command');
+assert(as.classifyTool('exec_command').subcategory === 'command', 'Codex exec_command → command');
+assert(as.classifyTool('write_stdin').subcategory === 'command', 'Codex write_stdin → command');
 assert(as.classifyTool('Edit').category === 'edit', 'Edit → edit');
 assert(as.classifyTool('Write').category === 'edit', 'Write → edit');
 assert(as.classifyTool('WriteFile').category === 'edit', 'WriteFile → edit');
@@ -319,8 +321,8 @@ var singleSeg = {
 };
 html = as.renderSegmentCard(singleSeg, 1);
 assert(html.indexOf('act-edit') >= 0, 'single: has act-edit');
-assert(html.indexOf('toggleActDetail') < 0, 'single: no toggle');
-assert(html.indexOf('act-detail-inline') >= 0, 'single: shows inline detail');
+assert(html.indexOf('toggleActDetail') >= 0, 'single: has toggle');
+assert(html.indexOf('act-detail-inline') < 0, 'single: no inline detail');
 assert(html.indexOf('a.rs') >= 0, 'single: preview is visible');
 
 // ============================================================
@@ -349,9 +351,9 @@ var settledGroup = {
 };
 html = as.renderTurnBanner(settledGroup, 0);
 assert(html.indexOf('act-settled') >= 0, 'settled: has act-settled');
-assert(html.indexOf('工作了') >= 0, 'settled: has 工作了');
+assert(html.indexOf('Worked for') >= 0, 'settled: has Worked for');
 assert(html.indexOf('3m 21s') >= 0, 'settled: has duration');
-assert(html.indexOf('2 次操作') >= 0, 'settled: has tool count');
+assert(html.indexOf('Ran 2 commands') >= 0, 'settled: has command count');
 assert(html.indexOf('toggleTurnBody') >= 0, 'settled: has toggle');
 assert(html.indexOf('toggleTurnBody(this)') >= 0, 'turn toggle is element-local');
 
@@ -371,7 +373,7 @@ var runningGroup = {
 html = as.renderTurnBanner(runningGroup, 1);
 assert(html.indexOf('act-running') >= 0, 'running: has act-running');
 assert(html.indexOf('act-pulse') >= 0, 'running: has pulse indicator');
-assert(html.indexOf('进行中') >= 0, 'running: has 进行中');
+assert(html.indexOf('Working') >= 0, 'running: has Working');
 assert(html.indexOf('toggleTurnBody') < 0, 'running: no toggle on banner');
 
 // ============================================================
@@ -401,6 +403,19 @@ var kimiSegs = as.buildSegments([
 assertEq(kimiSegs.length, 1);
 assertEq(kimiSegs[0].type, 'edit');
 assertEq(kimiSegs[0].items.length, 2);
+
+// ============================================================
+// Codex 命令工具压缩
+// ============================================================
+
+console.log('Codex command tools');
+var codexCmdSegs = as.buildSegments([
+  { role: 'tool_summary', tool_name: 'exec_command', tool_input_preview: 'git status', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+  { role: 'tool_summary', tool_name: 'write_stdin', tool_input_preview: '{"session_id":1}', timestamp: '2026-05-01T10:00:02Z', seq: 2 },
+]);
+assertEq(codexCmdSegs.length, 1, 'Codex command tools merge');
+assertEq(codexCmdSegs[0].commandCount, 2, 'Codex command count');
+assert(codexCmdSegs[0].summary.indexOf('Ran 2 commands') >= 0, 'Codex summary uses Ran 2 commands');
 
 // ============================================================
 // 长序列合并
