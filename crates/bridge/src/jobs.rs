@@ -1251,14 +1251,19 @@ fn exec_job(
         };
         let _ = store.update_job_finished_with_completed_reason(job_id, final_status, &now, code, reason, Some(completed_reason));
     } else {
-        // Child exited without status (e.g. killed by cancel) — let DB status guard handle it
+        // Child exited without status (e.g. killed by cancel or signal)
+        let reason = if cancel_flag.load(Ordering::Relaxed) {
+            "cancelled"
+        } else {
+            "timeout_killed"
+        };
         let _ = store.update_job_finished_with_completed_reason(
             job_id,
             "failed",
             &now,
             None,
             Some("process ended without exit status"),
-            Some("timeout_killed"),
+            Some(reason),
         );
     }
 
