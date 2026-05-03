@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Aspect</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Loading state -->
+  <div id="loading" class="screen">
+    <div class="spinner"></div>
+    <p>Starting Agent Aspect...</p>
+  </div>
+
+  <!-- Diagnostics state (bridge not running) -->
+  <div id="diagnostics" class="screen" style="display:none">
+    <div class="header">
+      <h1>Agent Aspect</h1>
+      <p class="subtitle">Bridge Not Running</p>
+    </div>
+    <div class="card">
+      <p class="description">The Agent Aspect bridge is not reachable. Start it to use the Web UI.</p>
+      <div id="diag-grid" class="diag-grid"></div>
+      <div class="actions">
+        <button id="btn-start" class="btn primary">Start Bridge</button>
+        <button id="btn-retry" class="btn">Retry</button>
+      </div>
+      <p id="error-msg" class="error" style="display:none"></p>
+    </div>
+  </div>
+
+  <!-- Redirecting state -->
+  <div id="redirecting" class="screen" style="display:none">
+    <div class="spinner"></div>
+    <p>Loading Web UI...</p>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
