@@ -11,7 +11,7 @@
 //! - context_strategy 控制日志截断：none / last_50_lines / last_100_lines / full_log
 
 use checkpoint_core::audit::AuditStore;
-use checkpoint_core::store::workflows::{WorkflowRow, WorkflowStepRow};
+use checkpoint_core::store::workflows::WorkflowStepRow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -121,16 +121,19 @@ impl WorkflowRunner {
         Ok(())
     }
 
-    /// 取消正在运行的工作流。
+    /// 取消正在运行的工作流。设置 cancel_flag 让后台线程自行收敛。
     pub fn cancel_workflow(&self, workflow_id: &str) -> Result<bool, String> {
-        let guard = self.running.lock().unwrap();
-        if let Some(ref running) = *guard {
-            if running.workflow_id == workflow_id {
-                running.cancel_flag.store(true, Ordering::SeqCst);
-                return Ok(true);
+        {
+            let guard = self.running.lock().unwrap();
+            if let Some(ref running) = *guard {
+                if running.workflow_id == workflow_id {
+                    running.cancel_flag.store(true, Ordering::SeqCst);
+                    return Ok(true);
+                }
             }
         }
-        // 如果没有在运行器中（可能已完成或未启动），直接更新 DB 状态
+
+        // 不在运行器中（可能已完成或未启动），直接更新 DB 状态
         let store = AuditStore::open(&self.db_path)
             .map_err(|e| format!("open db: {e}"))?;
         let wf = store.get_workflow(workflow_id)
@@ -141,8 +144,21 @@ impl WorkflowRunner {
             let now = chrono::Utc::now().to_rfc3339();
             store.update_workflow_status(workflow_id, "cancelled", &now)
                 .map_err(|e| format!("update status: {e}"))?;
-            store.cancel_workflow_steps(workflow_id)
-                .map_err(|e| format!("cancel steps: {e}"))?;
+
+            // 取消所有未完成步骤，并尝试 cancel 关联的 running job
+            let steps = store.get_workflow_steps(workflow_id)
+                .map_err(|e| format!("query steps: {e}"))?;
+            for step in &steps {
+                if step.status == "pending" || step.status == "running" {
+                    let _ = store.update_workflow_step_status(&step.id, "cancelled", None);
+                    // 如果步骤有关联的 running job，尝试取消它
+                    if step.status == "running" {
+                        if let Some(ref job_id) = step.job_id {
+                            let _ = store.cancel_job(job_id);
+                        }
+                    }
+                }
+            }
             Ok(true)
         } else {
             Ok(false)
@@ -203,7 +219,6 @@ fn execute_workflow(
 enum ExecuteError {
     Cancelled,
     Db(String),
-    JobSubmit(String),
     JobFailed(String),
     Timeout,
 }
@@ -213,7 +228,6 @@ impl std::fmt::Display for ExecuteError {
         match self {
             ExecuteError::Cancelled => write!(f, "cancelled"),
             ExecuteError::Db(msg) => write!(f, "db error: {msg}"),
-            ExecuteError::JobSubmit(msg) => write!(f, "job submit: {msg}"),
             ExecuteError::JobFailed(msg) => write!(f, "job failed: {msg}"),
             ExecuteError::Timeout => write!(f, "workflow step timeout"),
         }
@@ -351,17 +365,13 @@ fn execute_workflow_inner(
 fn execute_step_job_sync(
     job_id: &str,
     db_path: &PathBuf,
-    job_runner: &Arc<JobRunner>,
+    _job_runner: &Arc<JobRunner>,
     cancel_flag: &Arc<AtomicBool>,
     _broadcaster: &SharedBroadcaster,
 ) -> Result<(), ExecuteError> {
-    // 提交 job 到 JobRunner（如果 JobRunner 空闲）
-    // 注意：这里简化处理，实际需要通过 JobRunner 的 submit 接口
-    // 由于 JobRunner 只支持白名单 kind，我们直接通过 DB 状态轮询
-
-    let store = AuditStore::open(db_path).map_err(|e| ExecuteError::Db(e.to_string()))?;
-
-    // 等待 job 被 picked up（polling）
+    // 轮询 job 状态直到 terminal（succeeded/failed/cancelled）
+    // 由于 JobRunner 只支持白名单 kind 且单 job 并发，
+    // workflow step job 直接写 DB 后等待外部 JobRunner pickup 或超时。
     let start = std::time::Instant::now();
     let timeout = Duration::from_secs(600); // 10 分钟 per step
 
@@ -374,7 +384,7 @@ fn execute_step_job_sync(
             return Err(ExecuteError::Timeout);
         }
 
-        // 重新打开 DB 获取最新状态
+        // 每次轮询打开独立连接，避免长期持锁
         let store = AuditStore::open(db_path).map_err(|e| ExecuteError::Db(e.to_string()))?;
         if let Ok(Some(job)) = store.get_job(job_id) {
             match job.status.as_str() {
@@ -601,7 +611,7 @@ pub fn handle_get_workflow(
 
 /// POST /workflows/:id/run — 触发工作流执行。
 pub fn handle_post_workflow_run(
-    ctx: &crate::context::AppContext,
+    _ctx: &crate::context::AppContext,
     workflow_id: &str,
     workflow_runner: &Arc<WorkflowRunner>,
     job_runner: &Arc<JobRunner>,

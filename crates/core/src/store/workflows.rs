@@ -115,7 +115,7 @@ impl AuditStore {
             .map_err(CheckpointError::QueryWorkflow)
     }
 
-    /// 更新工作流状态。只在当前状态匹配 from_status 时才更新。
+    /// 更新工作流状态。允许从任何状态转移到新状态。
     pub fn update_workflow_status(
         &self,
         id: &str,
@@ -291,9 +291,9 @@ impl AuditStore {
         let (total, succeeded, failed, pending): (i64, i64, i64, i64) = self.conn.query_row(
             "SELECT
                 COUNT(*),
-                SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN status IN ('failed', 'cancelled') THEN 1 ELSE 0 END),
-                SUM(CASE WHEN status IN ('pending', 'running') THEN 1 ELSE 0 END)
+                COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN status IN ('failed', 'cancelled') THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN status IN ('pending', 'running') THEN 1 ELSE 0 END), 0)
              FROM workflow_steps WHERE workflow_id = ?1",
             rusqlite::params![workflow_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -399,5 +399,115 @@ mod tests {
         assert_eq!(succeeded, 1);
         assert_eq!(failed, 0);
         assert_eq!(pending, 2);
+    }
+
+    #[test]
+    fn step_counts_empty_workflow() {
+        let store = AuditStore::open_in_memory().unwrap();
+        let now = "2026-05-04T10:00:00Z";
+
+        store.insert_workflow("wf-empty", "Empty", "", now).unwrap();
+        let (total, succeeded, failed, pending) = store.workflow_step_counts("wf-empty").unwrap();
+        assert_eq!(total, 0);
+        assert_eq!(succeeded, 0);
+        assert_eq!(failed, 0);
+        assert_eq!(pending, 0);
+    }
+
+    #[test]
+    fn get_workflow_nonexistent() {
+        let store = AuditStore::open_in_memory().unwrap();
+        let result = store.get_workflow("nonexistent").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn get_workflow_step_nonexistent() {
+        let store = AuditStore::open_in_memory().unwrap();
+        let result = store.get_workflow_step("nonexistent").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn list_workflows_pagination() {
+        let store = AuditStore::open_in_memory().unwrap();
+        let now = "2026-05-04T10:00:00Z";
+
+        for i in 0..5 {
+            store.insert_workflow(&format!("wf{i}"), &format!("WF {i}"), "", now).unwrap();
+        }
+
+        let page1 = store.list_workflows(2, 0).unwrap();
+        assert_eq!(page1.len(), 2);
+
+        let page2 = store.list_workflows(2, 2).unwrap();
+        assert_eq!(page2.len(), 2);
+
+        let page3 = store.list_workflows(2, 4).unwrap();
+        assert_eq!(page3.len(), 1);
+
+        let page4 = store.list_workflows(2, 6).unwrap();
+        assert_eq!(page4.len(), 0);
+    }
+
+    #[test]
+    fn update_workflow_step_job_only_when_empty() {
+        let store = AuditStore::open_in_memory().unwrap();
+        let now = "2026-05-04T10:00:00Z";
+
+        store.insert_workflow("wf1", "Test", "", now).unwrap();
+        store.insert_workflow_step("s1", "wf1", 0, "agent_prompt", None, None, "p", "none", None, now).unwrap();
+
+        // First bind succeeds
+        assert!(store.update_workflow_step_job("s1", "job-1").unwrap());
+        let step = store.get_workflow_step("s1").unwrap().unwrap();
+        assert_eq!(step.job_id.as_deref(), Some("job-1"));
+
+        // Second bind is no-op (already bound)
+        assert!(!store.update_workflow_step_job("s1", "job-2").unwrap());
+        let step = store.get_workflow_step("s1").unwrap().unwrap();
+        assert_eq!(step.job_id.as_deref(), Some("job-1"));
+    }
+
+    #[test]
+    fn cancel_workflow_steps_mixed_statuses() {
+        let store = AuditStore::open_in_memory().unwrap();
+        let now = "2026-05-04T10:00:00Z";
+
+        store.insert_workflow("wf1", "Test", "", now).unwrap();
+        store.insert_workflow_step("s1", "wf1", 0, "agent_prompt", None, None, "p1", "none", None, now).unwrap();
+        store.insert_workflow_step("s2", "wf1", 1, "agent_prompt", None, None, "p2", "none", None, now).unwrap();
+        store.insert_workflow_step("s3", "wf1", 2, "agent_prompt", None, None, "p3", "none", None, now).unwrap();
+        store.insert_workflow_step("s4", "wf1", 3, "agent_prompt", None, None, "p4", "none", None, now).unwrap();
+
+        store.update_workflow_step_status("s1", "succeeded", Some(now)).unwrap();
+        store.update_workflow_step_status("s2", "failed", Some(now)).unwrap();
+        // s3, s4 are pending
+
+        let cancelled = store.cancel_workflow_steps("wf1").unwrap();
+        // Only pending and running are cancelled (s3, s4)
+        assert_eq!(cancelled, 2);
+
+        assert_eq!(store.get_workflow_step("s1").unwrap().unwrap().status, "succeeded");
+        assert_eq!(store.get_workflow_step("s2").unwrap().unwrap().status, "failed");
+        assert_eq!(store.get_workflow_step("s3").unwrap().unwrap().status, "cancelled");
+        assert_eq!(store.get_workflow_step("s4").unwrap().unwrap().status, "cancelled");
+    }
+
+    #[test]
+    fn get_next_pending_respects_step_order() {
+        let store = AuditStore::open_in_memory().unwrap();
+        let now = "2026-05-04T10:00:00Z";
+
+        store.insert_workflow("wf1", "Test", "", now).unwrap();
+        // Insert out of order
+        store.insert_workflow_step("s2", "wf1", 2, "agent_prompt", None, None, "step 2", "none", None, now).unwrap();
+        store.insert_workflow_step("s1", "wf1", 1, "agent_prompt", None, None, "step 1", "none", None, now).unwrap();
+        store.insert_workflow_step("s0", "wf1", 0, "agent_prompt", None, None, "step 0", "none", None, now).unwrap();
+
+        // Should return step_order=0 first
+        let next = store.get_next_pending_step("wf1").unwrap().unwrap();
+        assert_eq!(next.id, "s0");
+        assert_eq!(next.step_order, 0);
     }
 }

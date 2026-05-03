@@ -118,19 +118,19 @@ function submitCreateWf() {
   syncWfStepsFromDom();
   const name = (document.getElementById('wf-name') || {}).value || '';
   const desc = (document.getElementById('wf-desc') || {}).value || '';
-  if (!name.trim()) { showToast('请输入名称', 'warn'); return; }
-  if (WFS.steps.length === 0) { showToast('至少需要一个步骤', 'warn'); return; }
+  if (!name.trim()) { toast('请输入名称'); return; }
+  if (WFS.steps.length === 0) { toast('至少需要一个步骤'); return; }
   for (const s of WFS.steps) {
-    if (!s.prompt.trim()) { showToast('步骤提示词不能为空', 'warn'); return; }
+    if (!s.prompt.trim()) { toast('步骤提示词不能为空'); return; }
   }
 
-  apiFetch('/workflows', {
+  api('/workflows', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: name.trim(), description: desc.trim(), steps: WFS.steps })
   }).then(r => r.json()).then(data => {
     if (data.id) {
-      showToast('工作流已创建');
+      toast('工作流已创建');
       WFS.createOpen = false;
       const el = document.getElementById('wf-create-form');
       if (el) el.classList.add('hidden');
@@ -138,14 +138,14 @@ function submitCreateWf() {
       loadWorkflowList();
       selectWorkflow(data.id);
     } else {
-      showToast(data.error || '创建失败', 'error');
+      toast(data.error || '创建失败');
     }
-  }).catch(e => showToast('请求失败: ' + e, 'error'));
+  }).catch(e => toast('请求失败: ' + e));
 }
 
 /* ---------- List ---------- */
 function loadWorkflowList() {
-  apiFetch('/workflows?limit=50').then(r => r.json()).then(data => {
+  api('/workflows?limit=50').then(r => r.json()).then(data => {
     WFS.list = data.workflows || [];
     renderWfList();
   }).catch(() => {});
@@ -181,7 +181,7 @@ function renderWfList() {
 
 /* ---------- Detail ---------- */
 function selectWorkflow(id) {
-  apiFetch('/workflows/' + id).then(r => r.json()).then(data => {
+  api('/workflows/' + id).then(r => r.json()).then(data => {
     WFS.selected = data;
     renderWfList();
     renderWfDetail();
@@ -237,33 +237,33 @@ function renderWfDetail() {
 
 /* ---------- Actions ---------- */
 function runWorkflow(id) {
-  apiFetch('/workflows/' + id + '/run', { method: 'POST' })
+  api('/workflows/' + id + '/run', { method: 'POST' })
     .then(r => r.json())
     .then(data => {
       if (data.status === 'running') {
-        showToast('工作流已开始执行');
+        toast('工作流已开始执行');
         selectWorkflow(id);
         startWfPolling();
       } else {
-        showToast(data.error || '执行失败', 'error');
+        toast(data.error || '执行失败');
       }
     })
-    .catch(e => showToast('请求失败: ' + e, 'error'));
+    .catch(e => toast('请求失败: ' + e));
 }
 
 function cancelWorkflow(id) {
-  apiFetch('/workflows/' + id + '/cancel', { method: 'POST' })
+  api('/workflows/' + id + '/cancel', { method: 'POST' })
     .then(r => r.json())
     .then(data => {
       if (data.status === 'cancelled') {
-        showToast('工作流已取消');
+        toast('工作流已取消');
         selectWorkflow(id);
         stopWfPolling();
       } else {
-        showToast(data.error || '取消失败', 'error');
+        toast(data.error || '取消失败');
       }
     })
-    .catch(e => showToast('请求失败: ' + e, 'error'));
+    .catch(e => toast('请求失败: ' + e));
 }
 
 /* ---------- Polling ---------- */
