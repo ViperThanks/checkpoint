@@ -257,7 +257,7 @@ function cleanAgentLogChunk(log) {
 // ============================================================
 
 function getTheme() {
-  try { return localStorage.getItem('cp_theme') || 'dark'; } catch (e) { return 'dark'; }
+  try { return localStorage.getItem('cp_theme') || 'light'; } catch (e) { return 'light'; }
 }
 
 function setTheme(theme) {

@@ -1034,3 +1034,47 @@ function showCostConfirmDialog(costResp, originalBody, pending, c) {
   }
   _resubmitForceConfirm(originalBody, pending, c);
 }
+
+/* ---------- Sidebar resize ---------- */
+(function() {
+  var handle = document.getElementById('conv-resize-handle');
+  var panel = document.getElementById('conv-list-panel');
+  if (!handle || !panel) return;
+
+  var STORAGE_KEY = 'cp_conv_list_w';
+  var MIN = 200, MAX = 600;
+
+  // Restore saved width
+  var saved = parseInt(localStorage.getItem(STORAGE_KEY), 10);
+  if (saved >= MIN && saved <= MAX) {
+    panel.style.width = saved + 'px';
+  }
+
+  var dragging = false, startX = 0, startW = 0;
+
+  handle.addEventListener('pointerdown', function(e) {
+    dragging = true;
+    startX = e.clientX;
+    startW = panel.offsetWidth;
+    handle.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    handle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  handle.addEventListener('pointermove', function(e) {
+    if (!dragging) return;
+    var w = Math.min(MAX, Math.max(MIN, startW + (e.clientX - startX)));
+    panel.style.width = w + 'px';
+  });
+
+  handle.addEventListener('pointerup', function(e) {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('active');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    localStorage.setItem(STORAGE_KEY, panel.offsetWidth);
+  });
+})();
