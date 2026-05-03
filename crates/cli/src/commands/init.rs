@@ -354,10 +354,7 @@ mod tests {
         assert!(hook_cmd.contains("agent-aspect-hook"));
 
         // Stop should NOT have matcher="*"
-        let matcher = arr[0]
-            .get("matcher")
-            .and_then(|m| m.as_str())
-            .unwrap_or("");
+        let matcher = arr[0].get("matcher").and_then(|m| m.as_str()).unwrap_or("");
         assert_eq!(matcher, "", "Stop hook must not have matcher=\"*\"");
 
         // PreToolUse should have matcher="*"

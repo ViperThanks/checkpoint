@@ -104,6 +104,11 @@ pub fn bridge_token_path() -> PathBuf {
     join_in_base("bridge.token")
 }
 
+/// bridge 默认用户密码文件。
+pub fn bridge_password_path() -> PathBuf {
+    join_in_base("bridge.password")
+}
+
 /// relay macOS 端 token。
 pub fn relay_mac_token_path() -> PathBuf {
     join_in_base("relay.mac_token")

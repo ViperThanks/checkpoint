@@ -1,14 +1,15 @@
-<!-- Token overlay -->
+<!-- Login overlay -->
 <div class="token-overlay" id="token-overlay">
   <div class="token-box">
     <div class="token-brand">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
       <span>Agent Aspect</span>
     </div>
-    <p class="token-desc">连接到 Bridge 控制面板</p>
-    <input type="password" id="token-input" placeholder="粘贴 Bridge Token" autocomplete="off">
-    <button class="btn btn-primary" onclick="saveToken()">连接</button>
-    <p class="token-hint">Token 位于 ~/.agent-aspect/bridge.token</p>
+    <p class="token-desc">登录 Bridge 控制面板</p>
+    <input type="text" id="username-input" placeholder="用户名" value="admin" autocomplete="username">
+    <input type="password" id="password-input" placeholder="密码" autocomplete="current-password">
+    <button class="btn btn-primary" id="login-btn" onclick="doLogin()">登录</button>
+    <p class="token-hint" id="login-error" style="display:none;color:var(--red)"></p>
   </div>
 </div>
 
@@ -41,7 +42,8 @@
     <div class="sidebar-footer">
       <div class="mode-indicator" id="sidebar-mode">Guard</div>
       <div class="sidebar-footer-actions">
-        <button class="sidebar-logout" onclick="clearToken()">退出</button>
+        <button class="sidebar-logout" onclick="showChangePassword()">修改密码</button>
+        <button class="sidebar-logout" onclick="doLogout()">退出</button>
         <button class="theme-toggle" onclick="toggleTheme()" title="切换主题"><span class="theme-toggle-icon">🌙</span></button>
       </div>
       <div class="sidebar-version" id="sidebar-version"></div>
@@ -58,7 +60,7 @@
         <span class="dot dot-on" id="header-dot"></span>
       </div>
       <div class="header-mode-pills" id="header-mode-pills"></div>
-      <button class="header-logout" onclick="clearToken()">退出</button>
+      <button class="header-logout" onclick="doLogout()">退出</button>
     </header>
 
     <!-- Tab views -->
@@ -180,3 +182,18 @@
 
 <!-- Toast container -->
 <div class="toast-container" id="toast-container"></div>
+
+<!-- Change password modal -->
+<div class="modal-overlay hidden" id="chpwd-modal">
+  <div class="token-box" style="max-width:360px">
+    <h3 style="margin:0 0 12px;font-size:16px">修改密码</h3>
+    <input type="password" id="chpwd-old" placeholder="当前密码" autocomplete="current-password">
+    <input type="password" id="chpwd-new" placeholder="新密码（至少 12 字符）" autocomplete="new-password">
+    <input type="password" id="chpwd-confirm" placeholder="确认新密码" autocomplete="new-password">
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="doChangePassword()">确认</button>
+      <button class="btn" style="flex:1" onclick="closeChangePassword()">取消</button>
+    </div>
+    <p class="token-hint" id="chpwd-error" style="display:none;color:var(--red)"></p>
+  </div>
+</div>

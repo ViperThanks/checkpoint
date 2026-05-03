@@ -22,7 +22,7 @@ const SKELETON_HTML='<div class="skeleton-card"><div class="skeleton-row" style=
 
 // ===== Global State =====
 const S={
-  token:localStorage.getItem('cp_token')||'',
+  token:localStorage.getItem('agent_aspect_session_token')||'',
   mode:'',total:0,offset:0,
   selectedId:null,detailRenderedId:null,detailHash:'',
   draftNotes:{},noteOpen:{},
@@ -79,14 +79,58 @@ function scrollToSelectedEvent() {
 
 // toast — 来自 shared_ui/view_model.js
 
-// ===== Token =====
-function saveToken(){
-  S.token=document.getElementById('token-input').value.trim();if(!S.token)return;
-  localStorage.setItem('cp_token',S.token);init();
+// ===== Login =====
+function doLogin(){
+  const username=document.getElementById('username-input').value.trim();
+  const password=document.getElementById('password-input').value;
+  const errEl=document.getElementById('login-error');
+  const btn=document.getElementById('login-btn');
+  if(!username||!password){errEl.textContent='请输入用户名和密码';errEl.style.display='';return}
+  errEl.style.display='none';btn.textContent='登录中...';btn.disabled=true;
+  fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})})
+    .then(r=>r.json().then(j=>({ok:r.ok,data:j})))
+    .then(({ok,data})=>{
+      btn.textContent='登录';btn.disabled=false;
+      if(!ok||!data.token){errEl.textContent=data.error||'登录失败';errEl.style.display='';return}
+      S.token=data.token;
+      localStorage.setItem('agent_aspect_session_token',S.token);
+      errEl.style.display='none';
+      init();
+    })
+    .catch(()=>{
+      btn.textContent='登录';btn.disabled=false;
+      errEl.textContent='网络错误';errEl.style.display='';
+    });
 }
-function clearToken(){
-  localStorage.removeItem('cp_token');S.token='';stop();
-  document.getElementById('token-input').value='';
+function doLogout(){
+  localStorage.removeItem('agent_aspect_session_token');S.token='';stop();
+  document.getElementById('password-input').value='';
+}
+
+function showChangePassword(){
+  document.getElementById('chpwd-modal').classList.remove('hidden');
+  document.getElementById('chpwd-old').value='';
+  document.getElementById('chpwd-new').value='';
+  document.getElementById('chpwd-confirm').value='';
+  var e=document.getElementById('chpwd-error');e.style.display='none';e.textContent='';
+}
+function closeChangePassword(){
+  document.getElementById('chpwd-modal').classList.add('hidden');
+}
+function doChangePassword(){
+  var oldPwd=document.getElementById('chpwd-old').value;
+  var newPwd=document.getElementById('chpwd-new').value;
+  var confirmPwd=document.getElementById('chpwd-confirm').value;
+  var errEl=document.getElementById('chpwd-error');
+  if(newPwd.length<12){errEl.textContent='新密码至少 12 个字符';errEl.style.display='block';return;}
+  if(newPwd!==confirmPwd){errEl.textContent='两次输入的新密码不一致';errEl.style.display='block';return;}
+  errEl.style.display='none';
+  api('/password/change',{method:'POST',body:JSON.stringify({old_password:oldPwd,new_password:newPwd})})
+    .then(function(r){
+      if(r.error){errEl.textContent=r.error;errEl.style.display='block';return;}
+      closeChangePassword();
+      doLogout();
+    });
 }
 
 // ===== App Shell =====
@@ -249,5 +293,7 @@ function init(){
   }).catch(()=>stop());
 }
 
-if(S.token)document.getElementById('token-input').value='••••••••';
+// Enter key triggers login
+document.getElementById('password-input').addEventListener('keydown',function(e){if(e.key==='Enter')doLogin()});
+document.getElementById('username-input').addEventListener('keydown',function(e){if(e.key==='Enter')document.getElementById('password-input').focus()});
 init();

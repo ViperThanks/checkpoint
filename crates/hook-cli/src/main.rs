@@ -95,7 +95,10 @@ fn main() {
             };
 
             // Metadata 和 Stop 请求不需要输出 hook 响应
-            if matches!(request, WireRequest::Metadata { .. } | WireRequest::Stop { .. }) {
+            if matches!(
+                request,
+                WireRequest::Metadata { .. } | WireRequest::Stop { .. }
+            ) {
                 return;
             }
 

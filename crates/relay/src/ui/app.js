@@ -760,7 +760,7 @@ function renderConvMessageList(id, total, keepScroll) {
 
 /**
  * 使用 activity_segment.js 将消息分组并渲染。
- * 手机端与桌面端一致：每轮显示 Worked for，工具默认折叠，点击后看详情。
+ * 手机端与桌面端一致：turn 标签统一使用 shared_ui 的 turnBannerLabel。
  */
 function buildRelayActivityHtml(messages) {
   if (!messages || !messages.length) return '';
@@ -792,8 +792,7 @@ function buildRelayActivityHtml(messages) {
         if (!turnOpened && toolSegs.length > 0) {
           html += '<div class="act-turn act-settled">';
           html += '<div class="act-turn-bar" onclick="toggleTurnBody(this)">';
-          html += '<span class="act-turn-label">Worked for ' + escHtml(formatDuration(group.duration || 1)) + '</span>';
-          html += '<span class="act-turn-tools">Ran ' + group.toolCount + ' command' + (group.toolCount === 1 ? '' : 's') + '</span>';
+          html += turnBannerLabel(group);
           html += '<span class="act-turn-chevron" id="act-turn-chevron-r' + g + '">&#x25B8;</span>';
           html += '</div>';
           html += '<div class="act-turn-body" id="act-turn-body-r' + g + '" style="display:none">';

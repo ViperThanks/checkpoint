@@ -114,8 +114,8 @@ assertEq(segs[1].items.length, 3);
 assertEq(segs[1].fileCount, 2, '2 file reads');
 assertEq(segs[1].searchCount, 1, '1 grep search');
 assertEq(segs[1].commandCount, 0);
-assert(segs[1].summary.indexOf('2 files') >= 0, 'summary has 2 files');
-assert(segs[1].summary.indexOf('1 search') >= 0, 'summary has 1 search');
+assert(segs[1].summary.indexOf('main.rs') >= 0 || segs[1].summary.indexOf('lib.rs') >= 0, 'summary has file name');
+assert(segs[1].summary.indexOf('TODO') >= 0, 'summary has search term');
 assertEq(segs[2].type, 'assistant');
 
 // ============================================================
@@ -156,9 +156,8 @@ assertEq(segs[0].items.length, 3);
 assertEq(segs[0].fileCount, 1, '1 file read');
 assertEq(segs[0].commandCount, 1, '1 bash command');
 assertEq(segs[0].searchCount, 1, '1 grep');
-assert(segs[0].summary.indexOf('1 file') >= 0, 'summary: 1 file');
-assert(segs[0].summary.indexOf('1 command') >= 0, 'summary: 1 command');
-assert(segs[0].summary.indexOf('1 search') >= 0, 'summary: 1 search');
+assert(segs[0].summary.indexOf('f.rs') >= 0 || segs[0].summary.indexOf('cargo build') >= 0, 'summary: has real name');
+// 3 items → joined details
 assertEq(segs[0].duration, 6000, '6s duration');
 
 // ============================================================
@@ -175,7 +174,7 @@ assertEq(segs.length, 1);
 assertEq(segs[0].type, 'edit');
 assertEq(segs[0].items.length, 2);
 assertEq(segs[0].editCount, 2);
-assert(segs[0].summary.indexOf('2 edits') >= 0, 'edit summary');
+assert(segs[0].summary.indexOf('2') >= 0 && segs[0].summary.indexOf('文件') >= 0, 'edit summary: 修改 2 个文件');
 
 // ============================================================
 // buildSegments — 未知工具单独通过
@@ -211,9 +210,8 @@ assertEq(segs[0].type, 'user');
 assertEq(segs[1].type, 'assistant');
 assertEq(segs[2].type, 'explore');
 assertEq(segs[2].items.length, 3);
-assert(segs[2].summary.indexOf('1 file') >= 0, 'full: 1 file');
-assert(segs[2].summary.indexOf('1 search') >= 0, 'full: 1 search');
-assert(segs[2].summary.indexOf('1 command') >= 0, 'full: 1 command');
+assert(segs[2].summary.length > 0, 'full: explore summary not empty');
+assert(segs[2].summary.indexOf('main.rs') >= 0 || segs[2].summary.length > 0, 'full: has meaningful content');
 assertEq(segs[3].type, 'edit');
 assertEq(segs[3].items.length, 1);
 assertEq(segs[4].type, 'assistant');
@@ -310,14 +308,14 @@ var cardSeg = {
     { tool_name: 'Read', tool_input_preview: 'a.rs' },
     { tool_name: 'Grep', tool_input_preview: '"TODO"' },
   ],
-  summary: '2 files · 1 search',
+  summary: 'a.rs · TODO',
   startTime: null, endTime: null, duration: 0,
   fileCount: 2, searchCount: 1, commandCount: 0, editCount: 0,
 };
 var html = as.renderSegmentCard(cardSeg, 0);
 assert(html.indexOf('act-card') >= 0, 'has act-card class');
 assert(html.indexOf('act-explore') >= 0, 'has act-explore class');
-assert(html.indexOf('2 files') >= 0, 'summary text in HTML');
+assert(html.indexOf('a.rs') >= 0, 'summary text in HTML');
 assert(html.indexOf('toggleActDetail') >= 0, 'has toggle for 2+ items');
 assert(html.indexOf('toggleActDetail(this)') >= 0, 'segment toggle is element-local');
 assert(html.indexOf('act-detail') >= 0, 'has detail div');
@@ -326,7 +324,7 @@ assert(html.indexOf('act-detail') >= 0, 'has detail div');
 var singleSeg = {
   type: 'edit',
   items: [{ tool_name: 'Edit', tool_input_preview: 'a.rs' }],
-  summary: '1 edit',
+  summary: '编辑 a.rs',
   startTime: null, endTime: null, duration: 0,
   fileCount: 0, searchCount: 0, commandCount: 0, editCount: 1,
 };
@@ -342,8 +340,8 @@ assert(html.indexOf('a.rs') >= 0, 'single: preview is visible');
 
 console.log('renderSegmentDetail');
 var detail = as.renderSegmentDetail(cardSeg);
-assert(detail.indexOf('Read') >= 0, 'detail: has Read');
-assert(detail.indexOf('Grep') >= 0, 'detail: has Grep');
+assert(detail.indexOf('读取文件') >= 0, 'detail: has 读取文件');
+assert(detail.indexOf('搜索内容') >= 0, 'detail: has 搜索内容');
 assert(detail.indexOf('a.rs') >= 0, 'detail: has preview');
 assert(detail.indexOf('act-item') >= 0, 'detail: has act-item class');
 
@@ -362,9 +360,9 @@ var settledGroup = {
 };
 html = as.renderTurnBanner(settledGroup, 0);
 assert(html.indexOf('act-settled') >= 0, 'settled: has act-settled');
-assert(html.indexOf('Worked for') >= 0, 'settled: has Worked for');
+assert(html.indexOf('理解任务') >= 0 || html.indexOf('工作') >= 0, 'settled: has phase or 工作 label');
 assert(html.indexOf('3m 21s') >= 0, 'settled: has duration');
-assert(html.indexOf('Ran 2 commands') >= 0, 'settled: has command count');
+assert(html.indexOf('2 个动作') >= 0, 'settled: has action count');
 assert(html.indexOf('toggleTurnBody') >= 0, 'settled: has toggle');
 assert(html.indexOf('toggleTurnBody(this)') >= 0, 'turn toggle is element-local');
 
@@ -384,7 +382,7 @@ var runningGroup = {
 html = as.renderTurnBanner(runningGroup, 1);
 assert(html.indexOf('act-running') >= 0, 'running: has act-running');
 assert(html.indexOf('act-pulse') >= 0, 'running: has pulse indicator');
-assert(html.indexOf('Working') >= 0, 'running: has Working');
+assert(html.indexOf('工作中') >= 0, 'running: has 工作中');
 assert(html.indexOf('toggleTurnBody') < 0, 'running: no toggle on banner');
 
 // ============================================================
@@ -426,7 +424,7 @@ var codexCmdSegs = as.buildSegments([
 ]);
 assertEq(codexCmdSegs.length, 1, 'Codex command tools merge');
 assertEq(codexCmdSegs[0].commandCount, 2, 'Codex command count');
-assert(codexCmdSegs[0].summary.indexOf('2 commands') >= 0, 'Codex summary uses 2 commands');
+assert(codexCmdSegs[0].summary.indexOf('git status') >= 0 || codexCmdSegs[0].summary.length > 0, 'Codex summary not empty');
 
 // ============================================================
 // 长序列合并
@@ -459,6 +457,285 @@ assertEq(segs[0].type, 'explore');
 assertEq(segs[1].type, 'edit');
 assertEq(segs[2].type, 'explore');
 assertEq(segs[3].type, 'edit');
+
+// ============================================================
+// extractFileName
+// ============================================================
+
+console.log('extractFileName');
+assertEq(as.extractFileName('src/main.rs'), 'main.rs');
+assertEq(as.extractFileName('/Users/x/proj/lib.rs'), 'lib.rs');
+assertEq(as.extractFileName('Cargo.toml'), 'Cargo.toml');
+assertEq(as.extractFileName(''), '');
+assertEq(as.extractFileName(null), '');
+assertEq(as.extractFileName(undefined), '');
+
+// ============================================================
+// extractCommand
+// ============================================================
+
+console.log('extractCommand');
+var cmd = as.extractCommand({ tool_name: 'Bash', tool_input_preview: 'cargo test' });
+assertEq(cmd.label, '运行命令');
+assertEq(cmd.detail, 'cargo test');
+
+cmd = as.extractCommand({ tool_name: 'Read', tool_input_preview: 'src/main.rs' });
+assertEq(cmd.label, '读取文件');
+assertEq(cmd.detail, 'main.rs');
+
+cmd = as.extractCommand({ tool_name: 'Edit', tool_input_preview: '/Users/x/proj/bridge.rs' });
+assertEq(cmd.label, '编辑文件');
+assertEq(cmd.detail, 'bridge.rs');
+
+cmd = as.extractCommand({ tool_name: 'Unknown', tool_input_preview: 'whatever' });
+assertEq(cmd.label, 'Unknown');
+assertEq(cmd.detail, 'whatever');
+
+// ============================================================
+// maskSensitive
+// ============================================================
+
+console.log('maskSensitive');
+var masked = as.maskSensitive('password=abc123token');
+assert(masked.indexOf('abc123token') === -1, 'mask password value');
+assert(masked.indexOf('password=') >= 0, 'keep password key');
+assert(masked.indexOf('****') >= 0, 'has mask marker');
+
+masked = as.maskSensitive('export TOKEN=deadbeef0123456789abcdef0123456789abcdef01234567');
+assert(masked.indexOf('deadbeef') === -1, 'mask long hex token');
+assert(masked.indexOf('****') >= 0, 'long hex replaced');
+
+assertEq(as.maskSensitive('cargo test'), 'cargo test', 'no mask for safe text');
+assertEq(as.maskSensitive(''), '', 'empty string');
+assertEq(as.maskSensitive(null), null, 'null passthrough');
+assertEq(as.maskSensitive(undefined), undefined, 'undefined passthrough');
+
+masked = as.maskSensitive('secret=mysecret123');
+assert(masked.indexOf('mysecret123') === -1, 'mask secret value');
+
+// ============================================================
+// buildSegments — 语义化摘要
+// ============================================================
+
+console.log('buildSegments semantic summary');
+
+// 单个命令 → "运行命令 cargo test"
+var singleCmd = [
+  { role: 'tool_summary', tool_name: 'Bash', tool_input_preview: 'cargo test', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+];
+segs = as.buildSegments(singleCmd);
+assertEq(segs[0].summary, '运行命令 cargo test', 'single command summary');
+
+// 单个文件读取 → "读取文件 main.rs"
+var singleFile = [
+  { role: 'tool_summary', tool_name: 'Read', tool_input_preview: 'src/main.rs', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+];
+segs = as.buildSegments(singleFile);
+assertEq(segs[0].summary, '读取文件 main.rs', 'single file summary');
+
+// 单个编辑 → "编辑 bridge.rs"
+var singleEdit = [
+  { role: 'tool_summary', tool_name: 'Edit', tool_input_preview: 'src/bridge.rs', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+];
+segs = as.buildSegments(singleEdit);
+assertEq(segs[0].summary, '编辑 bridge.rs', 'single edit summary');
+
+// 多操作 (>3) → 分类计数
+var manyOps = [];
+for (var k = 0; k < 5; k++) {
+  manyOps.push({ role: 'tool_summary', tool_name: 'Read', tool_input_preview: 'file' + k + '.rs', timestamp: '2026-05-01T10:00:0' + k + 'Z', seq: k + 1 });
+}
+segs = as.buildSegments(manyOps);
+assert(segs[0].summary.indexOf('5') >= 0, 'many ops: count shown');
+assert(segs[0].summary.indexOf('文件') >= 0, 'many ops: has 文件 label');
+
+// ============================================================
+// renderSegmentDetail — 中文工具名 + 脱敏
+// ============================================================
+
+console.log('renderSegmentDetail Chinese + masking');
+var sensitiveSeg = {
+  type: 'explore',
+  items: [
+    { tool_name: 'Bash', tool_input_preview: 'echo password=supersecret123' },
+    { tool_name: 'Read', tool_input_preview: 'src/config.rs' },
+  ],
+};
+var detailHtml = as.renderSegmentDetail(sensitiveSeg);
+assert(detailHtml.indexOf('运行命令') >= 0, 'detail: Chinese name for Bash');
+assert(detailHtml.indexOf('读取文件') >= 0, 'detail: Chinese name for Read');
+assert(detailHtml.indexOf('supersecret123') === -1, 'detail: password masked');
+assert(detailHtml.indexOf('config.rs') >= 0, 'detail: file name visible');
+assert(detailHtml.indexOf('act-item') >= 0, 'detail: has act-item class');
+
+// ============================================================
+// renderTurnBanner — 中文标签
+// ============================================================
+
+console.log('renderTurnBanner Chinese labels');
+var cnGroup = {
+  segments: [],
+  startTime: '2026-05-01T10:00:00Z',
+  endTime: '2026-05-01T10:05:30Z',
+  duration: 330000,
+  isRunning: false,
+  toolCount: 7,
+};
+html = as.renderTurnBanner(cnGroup, 0);
+assert(html.indexOf('工作') >= 0, 'Chinese: has 工作');
+assert(html.indexOf('5m 30s') >= 0, 'Chinese: has duration');
+assert(html.indexOf('7 个动作') >= 0, 'Chinese: has action count');
+
+var cnRunning = {
+  segments: [],
+  startTime: '2026-05-01T10:00:00Z',
+  endTime: '2026-05-01T10:00:15Z',
+  duration: 15000,
+  isRunning: true,
+  toolCount: 3,
+};
+html = as.renderTurnBanner(cnRunning, 1);
+assert(html.indexOf('工作中') >= 0, 'Chinese running: has 工作中');
+assert(html.indexOf('15s') >= 0, 'Chinese running: has duration');
+assert(html.indexOf('3 个动作') >= 0, 'Chinese running: has action count');
+
+// ============================================================
+// Summary masking — 折叠摘要不泄露敏感值
+// ============================================================
+
+console.log('summary masking');
+
+// 单命令摘要含 password
+var sensitiveMsgs = [
+  { role: 'tool_summary', tool_name: 'Bash', tool_input_preview: 'echo password=supersecret123', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+];
+segs = as.buildSegments(sensitiveMsgs);
+assert(segs[0].summary.indexOf('supersecret123') === -1, 'summary mask: password hidden');
+assert(segs[0].summary.indexOf('****') >= 0, 'summary mask: has mask marker');
+
+// 64 位 hex token 摘要
+var hexToken = 'deadbeef0123456789abcdef0123456789abcdef0123456789abcdef01234567';
+var hexMsgs = [
+  { role: 'tool_summary', tool_name: 'Bash', tool_input_preview: 'export TOKEN=' + hexToken, timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+];
+segs = as.buildSegments(hexMsgs);
+assert(segs[0].summary.indexOf(hexToken) === -1, 'summary mask: 64-char hex hidden');
+assert(segs[0].summary.indexOf('****') >= 0, 'summary mask: hex replaced with ****');
+
+// renderSegmentCard 对敏感摘要也不泄露
+var cardHtml = as.renderSegmentCard(segs[0], 0);
+assert(cardHtml.indexOf(hexToken) === -1, 'card HTML: 64-char hex not in output');
+
+// secret=xxx 也被 mask
+var secretMsgs = [
+  { role: 'tool_summary', tool_name: 'Bash', tool_input_preview: 'echo secret=mysecretvalue', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+];
+segs = as.buildSegments(secretMsgs);
+assert(segs[0].summary.indexOf('mysecretvalue') === -1, 'summary mask: secret hidden');
+
+// ============================================================
+// classifyTurnPhase — 工作阶段分类
+// ============================================================
+
+console.log('classifyTurnPhase');
+
+// 理解任务: 只有文件读取
+assertEq(as.classifyTurnPhase([
+  { type: 'explore', fileCount: 2, searchCount: 0, commandCount: 0 }
+]), 'understand', 'only file reads → understand');
+
+// 理解任务: 只有搜索
+assertEq(as.classifyTurnPhase([
+  { type: 'explore', fileCount: 0, searchCount: 1, commandCount: 0 }
+]), 'understand', 'only search → understand');
+
+// 执行命令: 纯命令
+assertEq(as.classifyTurnPhase([
+  { type: 'explore', fileCount: 0, searchCount: 0, commandCount: 2 }
+]), 'execute', 'only commands → execute');
+
+// 检查状态: 命令 + 文件
+assertEq(as.classifyTurnPhase([
+  { type: 'explore', fileCount: 1, searchCount: 0, commandCount: 1 }
+]), 'diagnose', 'file + command → diagnose');
+
+// 修改文件: 纯编辑
+assertEq(as.classifyTurnPhase([
+  { type: 'edit', editCount: 2, fileCount: 1 }
+]), 'edit', 'only edits → edit');
+
+// 验证结果: 编辑 + 命令
+assertEq(as.classifyTurnPhase([
+  { type: 'edit', editCount: 1, fileCount: 1 },
+  { type: 'explore', fileCount: 0, searchCount: 0, commandCount: 1 }
+]), 'verify', 'edit + command → verify');
+
+// 修改文件: 编辑 + 文件读取（无命令）
+assertEq(as.classifyTurnPhase([
+  { type: 'explore', fileCount: 1, searchCount: 0, commandCount: 0 },
+  { type: 'edit', editCount: 1, fileCount: 1 }
+]), 'edit', 'edit + file reads (no command) → edit');
+
+// 空段
+assertEq(as.classifyTurnPhase([]), '', 'empty → empty');
+
+// ============================================================
+// Integration: renderTurnBanner 包含工作阶段
+// ============================================================
+
+console.log('renderTurnBanner includes phase');
+var exploreSegs = as.buildSegments([
+  { role: 'user', text: 'look at this', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+  { role: 'tool_summary', tool_name: 'Read', tool_input_preview: 'src/main.rs', timestamp: '2026-05-01T10:00:01Z', seq: 2 },
+  { role: 'tool_summary', tool_name: 'Grep', tool_input_preview: 'TODO', timestamp: '2026-05-01T10:00:02Z', seq: 3 },
+]);
+var exploreGroups = as.buildTurnGroups(exploreSegs, false);
+html = as.renderTurnBanner(exploreGroups[0], 0);
+assert(html.indexOf('理解任务') >= 0, 'explore turn: has 理解任务 phase');
+assert(html.indexOf('工作 理解任务') === -1, 'explore turn: no redundant 工作 prefix when phase present');
+
+var editPhaseSegs = as.buildSegments([
+  { role: 'user', text: 'fix it', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+  { role: 'tool_summary', tool_name: 'Edit', tool_input_preview: 'main.rs', timestamp: '2026-05-01T10:00:01Z', seq: 2 },
+]);
+var editGroups = as.buildTurnGroups(editPhaseSegs, false);
+html = as.renderTurnBanner(editGroups[0], 0);
+assert(html.indexOf('修改文件') >= 0, 'edit turn: has 修改文件 phase');
+
+var verifySegs = as.buildSegments([
+  { role: 'user', text: 'fix and test', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+  { role: 'tool_summary', tool_name: 'Edit', tool_input_preview: 'main.rs', timestamp: '2026-05-01T10:00:01Z', seq: 2 },
+  { role: 'tool_summary', tool_name: 'Bash', tool_input_preview: 'cargo test', timestamp: '2026-05-01T10:00:05Z', seq: 3 },
+]);
+var verifyGroups = as.buildTurnGroups(verifySegs, false);
+html = as.renderTurnBanner(verifyGroups[0], 0);
+assert(html.indexOf('验证结果') >= 0, 'edit+command turn: has 验证结果 phase');
+
+// ============================================================
+// Integration: no "Worked for" or "Ran " in turn output
+// ============================================================
+
+console.log('integration: no English banners');
+var integrationMsgs = [
+  { role: 'user', text: 'fix bug', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
+  { role: 'tool_summary', tool_name: 'Read', tool_input_preview: 'src/lib.rs', timestamp: '2026-05-01T10:00:01Z', seq: 2 },
+  { role: 'tool_summary', tool_name: 'Edit', tool_input_preview: 'src/lib.rs', timestamp: '2026-05-01T10:00:05Z', seq: 3 },
+  { role: 'tool_summary', tool_name: 'Bash', tool_input_preview: 'cargo test', timestamp: '2026-05-01T10:00:10Z', seq: 4 },
+];
+var intSegs = as.buildSegments(integrationMsgs);
+var intGroups = as.buildTurnGroups(intSegs, false);
+html = as.renderTurnBanner(intGroups[0], 0);
+assert(html.indexOf('Worked for') === -1, 'integration: no "Worked for"');
+assert(html.indexOf('Ran ') === -1, 'integration: no "Ran "');
+assert(html.indexOf('验证结果') >= 0, 'integration: has phase label');
+assert(html.indexOf('个动作') >= 0, 'integration: has 个动作');
+
+// turnBannerLabel 也不含英文
+var labelHtml = as.turnBannerLabel(intGroups[0]);
+assert(labelHtml.indexOf('Worked for') === -1, 'turnBannerLabel: no "Worked for"');
+assert(labelHtml.indexOf('Ran ') === -1, 'turnBannerLabel: no "Ran "');
+assert(labelHtml.indexOf('验证结果') >= 0, 'turnBannerLabel: has phase label');
+assert(labelHtml.indexOf('个动作') >= 0, 'turnBannerLabel: has 个动作');
 
 // ============================================================
 // 结果

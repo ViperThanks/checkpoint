@@ -25,6 +25,7 @@ pub use crate::store::feedback::FeedbackRow;
 pub use crate::store::jobs::{JobLogRow, JobRow};
 pub use crate::store::messages::SyncStateRow;
 pub use crate::store::suggestions::SuggestionRow;
+pub use crate::store::users::UserRow;
 
 /// 审计存储 facade — 持有 SQLite 连接，所有 DAO 方法通过 split impl 分布在各 store/ 子模块。
 pub struct AuditStore {
@@ -193,6 +194,7 @@ impl AuditStore {
         self.migrate_v11_runtime_identity()?;
         self.migrate_v12_job_completed_reason()?;
         self.migrate_v13_stop_marker()?;
+        self.migrate_v14_sys_user()?;
         self.conn
             .execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_conv_agent ON events(conversation_id, agent)",
@@ -441,12 +443,29 @@ impl AuditStore {
     fn migrate_v13_stop_marker(&self) -> CheckpointResult<()> {
         if !self.column_exists("jobs", "stop_requested_at")? {
             self.conn
-                .execute(
-                    "ALTER TABLE jobs ADD COLUMN stop_requested_at TEXT",
-                    [],
-                )
+                .execute("ALTER TABLE jobs ADD COLUMN stop_requested_at TEXT", [])
                 .map_err(CheckpointError::MigrateConversationSchema)?;
         }
+        Ok(())
+    }
+
+    /// v14: 新增 sys_user 表 — 用户名密码登录。
+    fn migrate_v14_sys_user(&self) -> CheckpointResult<()> {
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS sys_user (
+                    id TEXT PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    password_salt TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'owner',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_login_at TEXT,
+                    disabled_at TEXT
+                );",
+            )
+            .map_err(CheckpointError::MigrateConversationSchema)?;
         Ok(())
     }
 
@@ -1678,7 +1697,9 @@ mod tests {
         assert_eq!(rows, 1);
 
         // Idempotent: second set is a no-op
-        let rows = store.set_stop_requested_at("j-stop", "2026-05-03T10:05:01Z").unwrap();
+        let rows = store
+            .set_stop_requested_at("j-stop", "2026-05-03T10:05:01Z")
+            .unwrap();
         assert_eq!(rows, 0);
 
         // 3. Bridge tick: get jobs with stop_requested
@@ -1786,7 +1807,10 @@ mod tests {
         let found = store
             .find_running_job_by_conversation("claude_code", "sess-from-stop-payload")
             .unwrap();
-        assert!(found.is_none(), "no conversation_id on job, primary must miss");
+        assert!(
+            found.is_none(),
+            "no conversation_id on job, primary must miss"
+        );
 
         // Fallback lookup by project_path should hit
         let found = store

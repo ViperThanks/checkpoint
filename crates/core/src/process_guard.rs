@@ -61,7 +61,7 @@ pub fn stop_existing(state_path: &Path, expected_name: &str) -> StopResult {
             actual: "unknown".to_string(),
         };
     };
-    if actual != expected_name {
+    if !process_name_matches(&actual, expected_name) {
         eprintln!("process_guard: pid {pid} is '{actual}' not '{expected_name}', leaving it alone");
         std::fs::remove_file(state_path).ok();
         return StopResult::WrongProcess { pid, actual };
@@ -118,6 +118,24 @@ fn process_name(pid: u32) -> Option<String> {
     }
 }
 
+/// 判断实际进程名是否匹配期望名。
+///
+/// 改名迁移期允许旧 binary 名继续作为同一身份：
+/// - agent-aspect-bridge ↔ checkpoint-bridge
+/// - agent-aspectd ↔ checkpointd
+///
+/// 这只放宽 checkpoint 自身的新旧名称，不允许任意前缀匹配。
+fn process_name_matches(actual: &str, expected: &str) -> bool {
+    actual == expected
+        || matches!(
+            (expected, actual),
+            ("agent-aspect-bridge", "checkpoint-bridge")
+                | ("checkpoint-bridge", "agent-aspect-bridge")
+                | ("agent-aspectd", "checkpointd")
+                | ("checkpointd", "agent-aspectd")
+        )
+}
+
 /// 优雅关闭：先 SIGTERM 等待最多 1 秒，未退出则 SIGKILL。
 fn kill_gracefully(pid: u32) {
     eprintln!("process_guard: killing stale pid {pid} (SIGTERM)");
@@ -131,4 +149,45 @@ fn kill_gracefully(pid: u32) {
     eprintln!("process_guard: pid {pid} still alive, sending SIGKILL");
     unsafe { libc::kill(pid as i32, libc::SIGKILL) };
     std::thread::sleep(std::time::Duration::from_millis(200));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::process_name_matches;
+
+    #[test]
+    fn process_name_matches_current_and_legacy_bridge_names() {
+        assert!(process_name_matches(
+            "agent-aspect-bridge",
+            "agent-aspect-bridge"
+        ));
+        assert!(process_name_matches(
+            "checkpoint-bridge",
+            "agent-aspect-bridge"
+        ));
+        assert!(process_name_matches(
+            "agent-aspect-bridge",
+            "checkpoint-bridge"
+        ));
+    }
+
+    #[test]
+    fn process_name_matches_current_and_legacy_daemon_names() {
+        assert!(process_name_matches("agent-aspectd", "agent-aspectd"));
+        assert!(process_name_matches("checkpointd", "agent-aspectd"));
+        assert!(process_name_matches("agent-aspectd", "checkpointd"));
+    }
+
+    #[test]
+    fn process_name_matches_rejects_unrelated_names() {
+        assert!(!process_name_matches("bash", "agent-aspect-bridge"));
+        assert!(!process_name_matches(
+            "checkpoint-relay",
+            "agent-aspect-bridge"
+        ));
+        assert!(!process_name_matches(
+            "checkpoint-bridge-helper",
+            "checkpoint-bridge"
+        ));
+    }
 }

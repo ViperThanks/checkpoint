@@ -404,7 +404,14 @@ impl JobRunner {
                 .insert_job_log(&job_id, "system", "Prompt recorded. Remote execution not yet implemented — stored for future use.", 0, &now2)
                 .map_err(|e| SubmitError::Fatal(format!("log: {e}")))?;
             store
-                .update_job_finished_with_completed_reason(&job_id, "succeeded", &now2, Some(0), None, Some("process_exit"))
+                .update_job_finished_with_completed_reason(
+                    &job_id,
+                    "succeeded",
+                    &now2,
+                    Some(0),
+                    None,
+                    Some("process_exit"),
+                )
                 .map_err(|e| SubmitError::Fatal(format!("mark finished: {e}")))?;
 
             return Ok(job_id);
@@ -1278,7 +1285,14 @@ fn exec_job(
         } else {
             "process_exit_nonzero"
         };
-        let _ = store.update_job_finished_with_completed_reason(job_id, final_status, &now, code, reason, Some(completed_reason));
+        let _ = store.update_job_finished_with_completed_reason(
+            job_id,
+            final_status,
+            &now,
+            code,
+            reason,
+            Some(completed_reason),
+        );
     } else {
         // Child exited without status (e.g. killed by cancel or signal)
         let reason = if cancel_flag.load(Ordering::Relaxed) {

@@ -162,7 +162,14 @@ impl AuditStore {
         exit_code: Option<i32>,
         failure_reason: Option<&str>,
     ) -> CheckpointResult<()> {
-        self.update_job_finished_with_completed_reason(id, status, finished_at, exit_code, failure_reason, None)
+        self.update_job_finished_with_completed_reason(
+            id,
+            status,
+            finished_at,
+            exit_code,
+            failure_reason,
+            None,
+        )
     }
 
     /// 写入 job 终态，包含结构化 completed_reason（process_exit / timeout_killed / cancelled / bridge_restart）。
@@ -185,7 +192,14 @@ impl AuditStore {
                      completed_reason = COALESCE(?6, completed_reason),
                      heartbeat_at = ?2
                  WHERE id = ?4 AND status IN ('running', 'queued', 'observing')",
-                rusqlite::params![status, finished_at, exit_code, id, failure_reason, completed_reason],
+                rusqlite::params![
+                    status,
+                    finished_at,
+                    exit_code,
+                    id,
+                    failure_reason,
+                    completed_reason
+                ],
             )
             .map_err(CheckpointError::UpdateJob)?;
         Ok(())
@@ -504,11 +518,7 @@ impl AuditStore {
     }
 
     /// Set stop_requested_at on a running/observing job. Returns affected rows.
-    pub fn set_stop_requested_at(
-        &self,
-        job_id: &str,
-        timestamp: &str,
-    ) -> CheckpointResult<usize> {
+    pub fn set_stop_requested_at(&self, job_id: &str, timestamp: &str) -> CheckpointResult<usize> {
         let rows = self
             .conn
             .execute(
@@ -541,7 +551,10 @@ impl AuditStore {
             )
             .map_err(CheckpointError::QueryJob)?;
         let mut rows = stmt
-            .query_map(rusqlite::params![provider, conversation_id], Self::map_job_row)
+            .query_map(
+                rusqlite::params![provider, conversation_id],
+                Self::map_job_row,
+            )
             .map_err(CheckpointError::QueryJob)?;
         match rows.next() {
             Some(row) => Ok(Some(row.map_err(CheckpointError::QueryJob)?)),

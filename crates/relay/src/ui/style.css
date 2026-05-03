@@ -240,3 +240,35 @@ body.conv-detail-open .tabs{display:none}
 .chat-composer textarea{flex:1;min-height:52px;max-height:120px;resize:none;background:var(--bg);border-color:var(--border);border-radius:8px;font-size:14px;line-height:1.45}
 .chat-send{width:62px;min-height:44px;padding:0;border-radius:10px;background:var(--accent);flex:0 0 62px}
 .chat-send:disabled,.chat-composer textarea:disabled{opacity:.55}
+
+/* Activity — Timeline / Turn / Segment */
+.act-card{padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin-bottom:6px}
+.act-card.act-explore{border-left:2px solid var(--blue)}
+.act-card.act-edit{border-left:2px solid var(--orange)}
+.act-card.act-tool{border-left:2px solid var(--dim)}
+.act-summary{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.82rem}
+.act-summary:hover{color:var(--text)}
+.act-summary-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.act-detail{margin-top:6px;padding-top:6px;border-top:1px solid var(--border)}
+.act-item{display:flex;align-items:baseline;gap:6px;padding:3px 0;font-size:.76rem}
+.act-item-name{color:var(--accent);font-weight:600;white-space:nowrap;flex-shrink:0}
+.act-item-preview{font-family:monospace;font-size:.72rem;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;max-width:100%}
+.act-chevron{font-size:.65rem;opacity:.5;transition:transform .15s}
+
+.act-turn{margin:8px 0;border-left:2px solid var(--border);padding-left:0}
+.act-turn.act-running{border-left-color:var(--accent)}
+.act-turn-bar{display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;font-size:.78rem;color:var(--dim);border-radius:0 8px 8px 0}
+.act-turn-bar:hover{background:var(--surface2)}
+.act-turn-label{flex:1}
+.act-turn-tools{font-size:.72rem;opacity:.7}
+.act-turn-chevron{font-size:.7rem;opacity:.5}
+.act-turn-body{padding:4px 0 4px 12px}
+
+.act-pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);animation:act-pulse-anim 1.2s ease-in-out infinite}
+@keyframes act-pulse-anim{0%,100%{opacity:1}50%{opacity:.3}}
+
+@media(max-width:480px){
+  .act-item-preview{max-width:180px}
+  .act-summary{font-size:.76rem}
+  .act-turn-body{padding-left:6px}
+}

@@ -663,7 +663,7 @@ function loadChatMessages(cid, opts) {
 /**
  * 使用 activity_segment.js 将消息分组并渲染。
  * 用户/助手消息用现有 chat bubble，连续工具消息合并为摘要卡片。
- * Turn 级别的 "Worked for Xm Ys" 折叠标题。
+ * Turn 标签统一使用 shared_ui 的 turnBannerLabel。
  */
 function buildActivityHtml(messages) {
   if (!messages || !messages.length) return '';
@@ -700,12 +700,11 @@ function buildActivityHtml(messages) {
       } else if (seg.type === 'user') {
         continue;
       } else {
-        // 第一个工具段前开启 turn banner
+        // 第一个工具段前开启 turn banner — 使用 shared_ui 的统一标签
         if (!turnOpened && toolSegs.length > 0) {
           html += '<div class="act-turn act-settled">';
           html += '<div class="act-turn-bar" onclick="toggleTurnBody(this)">';
-          html += '<span class="act-turn-label">Worked for ' + escHtml(formatDuration(group.duration || 1)) + '</span>';
-          html += '<span class="act-turn-tools">Ran ' + group.toolCount + ' command' + (group.toolCount === 1 ? '' : 's') + '</span>';
+          html += turnBannerLabel(group);
           html += '<span class="act-turn-chevron" id="act-turn-chevron-t' + g + '">&#x25B8;</span>';
           html += '</div>';
           html += '<div class="act-turn-body" id="act-turn-body-t' + g + '" style="display:none">';

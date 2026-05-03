@@ -1,14 +1,17 @@
-//! Token 认证与 Relay 凭证管理 — Bearer token 生成/持久化、relay 注册。
+//! Token 认证与 Relay 凭证管理 — Bearer token 生成/持久化、relay 注册、用户 bootstrap。
 //!
 //! 架构角色：为 HTTP API 和 relay WebSocket 提供认证基础。
 //! - 本地 bridge token：首次启动时生成，写入 0600 权限文件
 //! - relay token：向 relay 服务器注册后获得 mac_token / client_token 对
+//! - 默认用户 bootstrap：启动时若 sys_user 为空，自动创建 admin/owner
 //!
 //! 核心不变量：
 //! - token 文件使用 create_new（原子创建），避免 TOCTOU 竞态
 //! - relay token 对必须同时存在，只有一个视为损坏并触发重新注册
 //! - Bearer token 校验使用恒定时间比较，防止时序攻击
+//! - 密码文件 0600 权限，启动日志只打印路径不打印密码
 
+use checkpoint_core::audit::AuditStore;
 use checkpoint_core::paths;
 use std::io::Write;
 
@@ -311,6 +314,34 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
         result |= x ^ y;
     }
     result == 0
+}
+
+/// 启动时若 sys_user 为空，自动创建 admin/owner 用户。
+///
+/// 密码来源优先级：
+/// 1. `AGENT_ASPECT_BRIDGE_PASSWORD` 环境变量
+/// 2. `~/.agent-aspect/bridge.password` 文件
+/// 3. 生成随机密码并写入 `bridge.password`（0600 权限）
+pub fn bootstrap_owner_user(store: &AuditStore) {
+    if let Err(e) = checkpoint_core::user_password::bootstrap_owner_user(store) {
+        eprintln!("agent-aspect-bridge: bootstrap failed: {e}");
+    }
+}
+
+/// 重置 admin 密码：生成新随机密码，更新 SQLite 和 bridge.password 文件。
+/// 返回明文新密码（CLI 可以打印到 stdout）。
+pub fn reset_admin_password(store: &AuditStore) -> Result<String, String> {
+    checkpoint_core::user_password::reset_admin_password(store)
+}
+
+/// 设置 admin 密码：用传入的新密码更新 SQLite 和 bridge.password 文件。
+pub fn set_admin_password(store: &AuditStore, new_password: &str) -> Result<(), String> {
+    checkpoint_core::user_password::set_admin_password(store, new_password)
+}
+
+/// 仅当 sys_user 为空时初始化 admin 用户；已有用户则拒绝。
+pub fn init_admin_user(store: &AuditStore) -> Result<(), String> {
+    checkpoint_core::user_password::init_admin_user(store)
 }
 
 #[cfg(test)]

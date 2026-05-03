@@ -21,6 +21,17 @@ use checkpoint_core::provider_registry::ProviderRegistry;
 use checkpoint_core::provider_resolver::ProviderResolver;
 use std::sync::Arc;
 
+fn is_loopback(request: &tiny_http::Request) -> bool {
+    use std::net::IpAddr;
+    request
+        .remote_addr()
+        .map(|addr| match addr.ip() {
+            IpAddr::V4(v4) => v4.is_loopback(),
+            IpAddr::V6(v6) => v6.is_loopback(),
+        })
+        .unwrap_or(false)
+}
+
 fn main() {
     // 1. 加载配置：环境变量优先于 config.toml
     let config = Config::load_or_create();
@@ -51,6 +62,12 @@ fn main() {
             eprintln!("agent-aspect-bridge: {e}");
             std::process::exit(1);
         });
+
+    // 4.5 Bootstrap 默认用户（sys_user 为空时自动创建 admin）
+    {
+        let store = ctx.store.lock().unwrap();
+        auth::bootstrap_owner_user(&store);
+    }
 
     let agent_prompt_timeout_secs = config.agent_prompt_timeout_secs.max(600);
     if agent_prompt_timeout_secs != config.agent_prompt_timeout_secs {
@@ -190,6 +207,28 @@ fn main() {
             let response = match (is_get, is_post, path.as_str()) {
                 (true, _, "/") => routes::handle_index(),
                 (true, _, "/health") => routes::handle_health(),
+                (_, true, "/login") => {
+                    if !is_loopback(&request) {
+                        routes::json_response(
+                            403,
+                            &serde_json::json!({"error": "login only allowed from loopback"}),
+                        )
+                    } else {
+                        routes::handle_post_login(&ctx, &mut request, &token)
+                    }
+                }
+                (_, true, "/password/change") => {
+                    if !is_loopback(&request) {
+                        routes::json_response(
+                            403,
+                            &serde_json::json!({"error": "password change only allowed from loopback"}),
+                        )
+                    } else if !auth::check_auth(&request, &token) {
+                        routes::json_response(403, &serde_json::json!({"error": "unauthorized"}))
+                    } else {
+                        routes::handle_post_password_change(&ctx, &mut request)
+                    }
+                }
                 (true, _, "/beat") => routes::handle_beat(),
                 (true, _, "/mode") => {
                     if !auth::check_auth(&request, &token) {

@@ -19,6 +19,7 @@ pub mod error;
 pub mod event;
 pub mod learn;
 pub mod normalize;
+pub mod password;
 pub mod paths;
 pub mod process_guard;
 pub mod provider_registry;
@@ -27,6 +28,7 @@ pub mod provider_scanner;
 pub mod rule;
 pub mod runtime_profile;
 pub mod store;
+pub mod user_password;
 pub mod utils;
 
 use crate::rule::{Mode, RuleSource};

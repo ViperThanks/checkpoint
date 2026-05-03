@@ -114,6 +114,150 @@ pub fn handle_health() -> tiny_http::ResponseBox {
     json_response(200, &serde_json::json!({"status": "ok"}))
 }
 
+/// POST /login 处理器 — 用户名 + 密码登录，成功返回 Bearer token。
+///
+/// 认证失败统一返回 401，不泄露用户是否存在。
+/// 成功时更新 last_login_at 并返回当前 bridge token。
+pub fn handle_post_login(
+    ctx: &AppContext,
+    request: &mut tiny_http::Request,
+    bridge_token: &str,
+) -> tiny_http::ResponseBox {
+    let parsed = match read_json_body(request) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+
+    let username = match parsed.get("username").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => {
+            return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
+        }
+    };
+    let password = match parsed.get("password").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => {
+            return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
+        }
+    };
+
+    let store = ctx.store.lock().unwrap();
+
+    let user = match store.get_user_by_username(username) {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
+        }
+        Err(e) => {
+            eprintln!("agent-aspect-bridge: login query failed: {e}");
+            return json_response(500, &serde_json::json!({"error": "internal error"}));
+        }
+    };
+
+    // 已禁用用户
+    if user.disabled_at.is_some() {
+        return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
+    }
+
+    if !checkpoint_core::password::verify_password(
+        password,
+        &user.password_hash,
+        &user.password_salt,
+    ) {
+        return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = store.update_last_login(&user.id, &now);
+
+    json_response(200, &serde_json::json!({"token": bridge_token}))
+}
+
+/// POST /password/change — 修改当前用户密码。
+///
+/// 需要 Bearer token 认证 + loopback（由 main.rs 路由层保障）。
+/// 成功后前端应清除 session token，要求重新登录。
+pub fn handle_post_password_change(
+    ctx: &AppContext,
+    request: &mut tiny_http::Request,
+) -> tiny_http::ResponseBox {
+    let parsed = match read_json_body(request) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+
+    let old_password = match parsed.get("old_password").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => {
+            return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
+        }
+    };
+    let new_password = match parsed.get("new_password").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => {
+            return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
+        }
+    };
+
+    if new_password.len() < 12 {
+        return json_response(400, &serde_json::json!({"error": "密码至少 12 个字符"}));
+    }
+
+    let store = ctx.store.lock().unwrap();
+
+    let user = match store.get_user_by_username("admin") {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            eprintln!("agent-aspect-bridge: password change: admin user not found");
+            return json_response(500, &serde_json::json!({"error": "internal error"}));
+        }
+        Err(e) => {
+            eprintln!("agent-aspect-bridge: password change query failed: {e}");
+            return json_response(500, &serde_json::json!({"error": "internal error"}));
+        }
+    };
+
+    if !checkpoint_core::password::verify_password(
+        old_password,
+        &user.password_hash,
+        &user.password_salt,
+    ) {
+        return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
+    }
+
+    let (hash, salt) = match checkpoint_core::password::hash_password(new_password) {
+        Ok(pair) => pair,
+        Err(e) => {
+            eprintln!("agent-aspect-bridge: password change hash failed: {e}");
+            return json_response(500, &serde_json::json!({"error": "internal error"}));
+        }
+    };
+
+    // 两阶段更新：先写文件，后改 DB，失败回滚
+    let password_path = checkpoint_core::paths::bridge_password_path();
+    let old_file = std::fs::read_to_string(&password_path).ok();
+    if let Err(e) =
+        checkpoint_core::user_password::overwrite_password_file(&password_path, new_password)
+    {
+        eprintln!("agent-aspect-bridge: password change write file failed: {e}");
+        return json_response(500, &serde_json::json!({"error": "internal error"}));
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    if let Err(e) = store.update_user_password(&user.id, &hash, &salt, &now) {
+        eprintln!("agent-aspect-bridge: password change DB update failed: {e}");
+        // 回滚文件
+        if let Some(old) = old_file {
+            let _ = checkpoint_core::user_password::overwrite_password_file(&password_path, &old);
+        } else {
+            let _ = std::fs::remove_file(&password_path);
+        }
+        return json_response(500, &serde_json::json!({"error": "internal error"}));
+    }
+
+    json_response(200, &serde_json::json!({"ok": true}))
+}
+
 /// 延迟探测端点 — 返回 bridge 端的收发时间戳，客户端计算 RTT。
 pub fn handle_beat() -> tiny_http::ResponseBox {
     let received = chrono::Utc::now().timestamp_millis();

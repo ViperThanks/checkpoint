@@ -55,6 +55,21 @@ if [ -z "$TOKEN" ]; then
     echo "FAIL: bridge.token not found after 5s"
     exit 1
 fi
+
+# 读取 bootstrap 生成的默认密码
+PASSWORD=""
+for i in $(seq 1 10); do
+    if [ -f "$HOME_OVERRIDE/.agent-aspect/bridge.password" ]; then
+        PASSWORD="$(cat "$HOME_OVERRIDE/.agent-aspect/bridge.password")"
+        break
+    fi
+    sleep 0.5
+done
+if [ -z "$PASSWORD" ]; then
+    echo "FAIL: bridge.password not found after 5s"
+    exit 1
+fi
+
 API="http://127.0.0.1:$PORT"
 AUTH="Authorization: Bearer $TOKEN"
 
@@ -561,12 +576,127 @@ else
 fi
 
 # ──────────────────────────────────────────────
+# 34-36: Login API
+# ──────────────────────────────────────────────
+
+echo ""
+echo "=== test 34: POST /login with correct credentials → 200 + token ==="
+LOGIN_RESP=$(curl -s -X POST \
+    -H "Content-Type: application/json" \
+    -d "{\"username\":\"admin\",\"password\":\"$PASSWORD\"}" \
+    "$API/login")
+LOGIN_TOKEN=$(echo "$LOGIN_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))")
+if [ "$LOGIN_TOKEN" = "$TOKEN" ]; then
+    echo "PASS: login returned matching token"
+else
+    echo "FAIL: login returned unexpected token: $LOGIN_RESP"
+    FAILED=1
+fi
+
+echo ""
+echo "=== test 35: POST /login with wrong password → 401 ==="
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"wrong-password"}' \
+    "$API/login")
+if [ "$HTTP_CODE" = "401" ]; then
+    echo "PASS"
+else
+    echo "FAIL: expected 401, got $HTTP_CODE"
+    FAILED=1
+fi
+
+echo ""
+echo "=== test 36: POST /login with nonexistent user → 401 ==="
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    -H "Content-Type: application/json" \
+    -d '{"username":"nouser","password":"anything"}' \
+    "$API/login")
+if [ "$HTTP_CODE" = "401" ]; then
+    echo "PASS"
+else
+    echo "FAIL: expected 401, got $HTTP_CODE"
+    FAILED=1
+fi
+
+echo ""
+echo "=== test 37: POST /password/change with correct old password → 200 ==="
+CHPWD_RESP=$(curl -s -X POST \
+    -H "$AUTH" -H "Content-Type: application/json" \
+    -d "{\"old_password\":\"$PASSWORD\",\"new_password\":\"new-test-password-12chars\"}" \
+    "$API/password/change")
+CHPWD_OK=$(echo "$CHPWD_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('ok',False))" 2>/dev/null)
+if [ "$CHPWD_OK" = "True" ]; then
+    # Verify new password works for login
+    LOGIN_RESP2=$(curl -s -X POST \
+        -H "Content-Type: application/json" \
+        -d '{"username":"admin","password":"new-test-password-12chars"}' \
+        "$API/login")
+    LOGIN_TOKEN2=$(echo "$LOGIN_RESP2" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))")
+    if [ "$LOGIN_TOKEN2" = "$TOKEN" ]; then
+        PASSWORD="new-test-password-12chars"
+        echo "PASS: password changed and new password works"
+    else
+        echo "FAIL: password changed but new password login failed: $LOGIN_RESP2"
+        FAILED=1
+    fi
+else
+    echo "FAIL: change password response: $CHPWD_RESP"
+    FAILED=1
+fi
+
+echo ""
+echo "=== test 38: POST /password/change with wrong old password → 401 ==="
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    -H "$AUTH" -H "Content-Type: application/json" \
+    -d '{"old_password":"wrong-old-password","new_password":"another-new-password"}' \
+    "$API/password/change")
+if [ "$HTTP_CODE" = "401" ]; then
+    echo "PASS"
+else
+    echo "FAIL: expected 401, got $HTTP_CODE"
+    FAILED=1
+fi
+
+echo ""
+echo "=== test 39: CLI bridge password reset → new password works ==="
+RESET_PWD=$("$BIN/agent-aspect" bridge password reset 2>/dev/null)
+if [ -n "$RESET_PWD" ] && [ ${#RESET_PWD} -ge 64 ]; then
+    # Verify old password no longer works
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"$PASSWORD\"}" \
+        "$API/login")
+    if [ "$HTTP_CODE" = "401" ]; then
+        # Verify new password works
+        LOGIN_RESP3=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"admin\",\"password\":\"$RESET_PWD\"}" \
+            "$API/login")
+        LOGIN_TOKEN3=$(echo "$LOGIN_RESP3" | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))")
+        if [ "$LOGIN_TOKEN3" = "$TOKEN" ]; then
+            PASSWORD="$RESET_PWD"
+            echo "PASS: reset generated new password, old password rejected, new works"
+        else
+            echo "FAIL: reset password login failed: $LOGIN_RESP3"
+            FAILED=1
+        fi
+    else
+        echo "FAIL: old password still works after reset (got $HTTP_CODE)"
+        FAILED=1
+    fi
+else
+    echo "FAIL: reset output too short or empty: '$RESET_PWD'"
+    FAILED=1
+fi
+
+# ──────────────────────────────────────────────
 # Summary
 # ──────────────────────────────────────────────
 
 echo ""
 if [ "$FAILED" -eq 0 ]; then
-    echo "=== ALL 33 BRIDGE TESTS PASSED ==="
+    echo "=== ALL 39 BRIDGE TESTS PASSED ==="
 else
     echo "=== SOME BRIDGE TESTS FAILED ==="
     exit 1

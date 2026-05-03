@@ -40,6 +40,20 @@ pub fn cmd_bridge(sub: Option<&str>, args: &[String]) {
         Some("stop") => bridge_stop(),
         Some("status") => bridge_status(),
         Some("token") => bridge_token(args),
+        Some("password") => {
+            let sub = args.first().map(|s| s.as_str());
+            match sub {
+                None | Some("show") => bridge_password_show(),
+                Some("reset") => bridge_password_reset(),
+                Some("set") => bridge_password_set(),
+                Some("init") => bridge_password_init(),
+                Some(other) => {
+                    eprintln!("unknown password subcommand: {other}");
+                    eprintln!("run 'agent-aspect bridge help' for usage");
+                    std::process::exit(1);
+                }
+            }
+        }
         Some("restart") => {
             apply_start_options(args);
             bridge_restart();
@@ -68,6 +82,7 @@ fn bridge_help() {
     println!("  agent-aspect bridge stop");
     println!("  agent-aspect bridge status");
     println!("  agent-aspect bridge token [--bridge|--relay-client|--relay-mac]");
+    println!("  agent-aspect bridge password [show|reset|set|init]");
     println!("  agent-aspect bridge relay <status|set-url|unset-url|token|help>");
     println!("  agent-aspect bridge install [--keep-awake]");
     println!("  agent-aspect bridge uninstall");
@@ -179,6 +194,86 @@ pub fn verify_bridge_pid(pid: u32, expected_exe: &str) -> (bool, bool) {
     (true, comm_name == expected_name)
 }
 
+/// 定位当前可用的 bridge binary；改名迁移期回退旧名。
+fn resolve_bridge_bin() -> Option<std::path::PathBuf> {
+    bridge_bin_candidates().into_iter().next()
+}
+
+/// 所有可接受的 bridge binary 路径，按新名优先。
+fn bridge_bin_candidates() -> Vec<std::path::PathBuf> {
+    let Some(dir) = bin_dir() else {
+        return Vec::new();
+    };
+    ["agent-aspect-bridge", "checkpoint-bridge"]
+        .into_iter()
+        .map(|name| dir.join(name))
+        .filter(|p| p.exists())
+        .collect()
+}
+
+/// pid 是否匹配任一新旧 bridge binary。
+fn verify_bridge_pid_against_candidates(pid: u32) -> Option<String> {
+    bridge_bin_candidates().into_iter().find_map(|bin| {
+        let expected = bin.to_string_lossy().to_string();
+        let (alive, verified) = verify_bridge_pid(pid, &expected);
+        (alive && verified).then_some(expected)
+    })
+}
+
+/// 当前配置期望的 bridge 端口。
+fn configured_bridge_port() -> u16 {
+    load_bridge_config()
+        .bridge_addr
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(7676)
+}
+
+/// 查找监听指定端口的 PID。只作为 state 缺失时的迁移兜底。
+fn listener_pid_on_port(port: u16) -> Option<u32> {
+    let output = std::process::Command::new("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fp"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix('p')?.parse::<u32>().ok())
+}
+
+/// state 文件缺失时，从监听端口恢复 bridge 状态。
+fn discover_running_bridge_without_state() -> Option<BridgeState> {
+    let port = read_bridge_port().unwrap_or_else(configured_bridge_port);
+    let pid = listener_pid_on_port(port)?;
+    let expected = verify_bridge_pid_against_candidates(pid)?;
+    Some(BridgeState {
+        pid,
+        exe: expected,
+        addr: format!("127.0.0.1:{port}"),
+        started_at: String::new(),
+    })
+}
+
+/// 停止 bridge pid，并等待退出。
+fn stop_bridge_pid(pid: u32) {
+    unsafe {
+        libc::kill(pid as i32, libc::SIGTERM);
+    }
+    for _ in 0..10 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if unsafe { libc::kill(pid as i32, 0) != 0 } {
+            return;
+        }
+    }
+    unsafe {
+        libc::kill(pid as i32, libc::SIGKILL);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(100));
+}
+
 /// 读取 bridge state 文件，验证 pid 身份，过期时自动清理。
 ///
 /// 如果 state 文件存在但 pid 已死或身份不匹配，会删除 state 和 port 文件，
@@ -188,20 +283,20 @@ pub fn verify_bridge_pid(pid: u32, expected_exe: &str) -> (bool, bool) {
 pub fn load_and_verify_state() -> Option<(BridgeState, bool)> {
     let state_path = paths::bridge_state_path();
     if !state_path.exists() {
-        return None;
+        return discover_running_bridge_without_state().map(|state| (state, true));
     }
     let raw = match std::fs::read_to_string(&state_path) {
         Ok(r) => r,
         Err(_) => {
             std::fs::remove_file(&state_path).ok();
-            return None;
+            return discover_running_bridge_without_state().map(|state| (state, true));
         }
     };
     let state: BridgeState = match serde_json::from_str(&raw) {
         Ok(s) => s,
         Err(_) => {
             std::fs::remove_file(&state_path).ok();
-            return None;
+            return discover_running_bridge_without_state().map(|state| (state, true));
         }
     };
     let (_alive, verified) = verify_bridge_pid(state.pid, &state.exe);
@@ -209,7 +304,7 @@ pub fn load_and_verify_state() -> Option<(BridgeState, bool)> {
         // pid dead or wrong process — stale, clean up
         std::fs::remove_file(&state_path).ok();
         std::fs::remove_file(paths::bridge_port_path()).ok();
-        return None;
+        return discover_running_bridge_without_state().map(|state| (state, true));
     }
     Some((state, true))
 }
@@ -237,22 +332,18 @@ fn bridge_start() {
         process_guard::StopResult::NotFound => {}
     }
 
-    let Some(dir) = bin_dir() else {
-        eprintln!("FAIL: cannot determine binary directory");
-        std::process::exit(1);
-    };
-    let bridge_bin = dir.join("agent-aspect-bridge");
-    let bridge_bin = if bridge_bin.exists() {
-        bridge_bin
-    } else {
-        dir.join("checkpoint-bridge")
-    };
-    if !bridge_bin.exists() {
+    let Some(bridge_bin) = resolve_bridge_bin() else {
         eprintln!(
-            "FAIL: agent-aspect-bridge not found at {}",
-            bridge_bin.display()
+            "FAIL: agent-aspect-bridge not found next to current CLI (legacy checkpoint-bridge also missing)"
         );
         std::process::exit(1);
+    };
+
+    if let Some((state, true)) = load_and_verify_state() {
+        stop_bridge_pid(state.pid);
+        std::fs::remove_file(paths::bridge_state_path()).ok();
+        std::fs::remove_file(paths::bridge_port_path()).ok();
+        println!("replaced previous bridge (pid {})", state.pid);
     }
 
     let mut cmd = std::process::Command::new(&bridge_bin);
@@ -298,25 +389,7 @@ fn bridge_stop() {
     };
 
     let pid = state.pid;
-    unsafe {
-        libc::kill(pid as i32, libc::SIGTERM);
-    }
-
-    // 等待进程退出
-    for _ in 0..10 {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        if unsafe { libc::kill(pid as i32, 0) != 0 } {
-            break;
-        }
-    }
-
-    // 如果还没退出，SIGKILL
-    if unsafe { libc::kill(pid as i32, 0) == 0 } {
-        unsafe {
-            libc::kill(pid as i32, libc::SIGKILL);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
+    stop_bridge_pid(pid);
 
     std::fs::remove_file(paths::bridge_state_path()).ok();
     std::fs::remove_file(paths::bridge_port_path()).ok();
@@ -394,6 +467,7 @@ fn bridge_status() {
     }
 
     println!("token: {}", token_path.display());
+    println!("password: {}", paths::bridge_password_path().display());
 }
 
 /// 判断当前 bridge launchd plist 是否通过 caffeinate 启动。
@@ -418,7 +492,7 @@ fn bridge_token(args: &[String]) {
         [flag] if flag == "--help" || flag == "-h" => {
             println!("Usage: agent-aspect bridge token [--bridge|--relay-client|--relay-mac]");
             println!();
-            println!("  --bridge        Print local bridge bearer token (default)");
+            println!("  --bridge        Print local bridge bearer token (default) [debug]");
             println!("  --relay-client  Print phone-facing relay client token");
             println!("  --relay-mac     Print Mac registration token for relay");
             return;
@@ -430,6 +504,87 @@ fn bridge_token(args: &[String]) {
     };
 
     print_token(token_kind);
+}
+
+/// 打印 bridge 默认登录密码（从 bridge.password 文件读取）。
+fn bridge_password_show() {
+    let path = paths::bridge_password_path();
+    if !path.exists() {
+        eprintln!("password file not found at {}", path.display());
+        eprintln!("start bridge first to generate password");
+        std::process::exit(1);
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(p) => println!("{}", p.trim()),
+        Err(e) => {
+            eprintln!("cannot read password: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// 重置 admin 密码：生成新随机密码，更新 SQLite 和文件。
+fn bridge_password_reset() {
+    let store = open_bridge_store();
+    match checkpoint_core::user_password::reset_admin_password(&store) {
+        Ok(new_pwd) => println!("{new_pwd}"),
+        Err(e) => {
+            eprintln!("reset failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// 设置 admin 密码：从 TTY 非回显读取，或从 stdin pipe 读取。
+fn bridge_password_set() {
+    let new_pwd = if atty::is(atty::Stream::Stdin) {
+        match rpassword::prompt_password("new password: ") {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("read password: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let mut buf = String::new();
+        if let Err(e) = std::io::stdin().read_line(&mut buf) {
+            eprintln!("read password: {e}");
+            std::process::exit(1);
+        }
+        buf.trim().to_string()
+    };
+    if new_pwd.len() < 12 {
+        eprintln!("password must be at least 12 characters");
+        std::process::exit(1);
+    }
+    let store = open_bridge_store();
+    if let Err(e) = checkpoint_core::user_password::set_admin_password(&store, &new_pwd) {
+        eprintln!("set failed: {e}");
+        std::process::exit(1);
+    }
+    eprintln!("password updated");
+}
+
+/// 仅当 sys_user 为空时初始化 admin 用户。
+fn bridge_password_init() {
+    let store = open_bridge_store();
+    if let Err(e) = checkpoint_core::user_password::init_admin_user(&store) {
+        eprintln!("init failed: {e}");
+        std::process::exit(1);
+    }
+    eprintln!(
+        "admin user initialized (password at {})",
+        paths::bridge_password_path().display()
+    );
+}
+
+/// 打开 bridge 的 SQLite 数据库连接（CLI 用）。
+fn open_bridge_store() -> checkpoint_core::audit::AuditStore {
+    let db_path = paths::audit_db_path();
+    checkpoint_core::audit::AuditStore::open(&db_path).unwrap_or_else(|e| {
+        eprintln!("cannot open database: {e}");
+        std::process::exit(1);
+    })
 }
 
 /// Token 类型枚举，对应不同的 token 文件和用途。

@@ -174,6 +174,15 @@ pub enum CheckpointError {
 
     #[error("update runtime identity failed: {0}")]
     UpdateRuntimeIdentity(#[source] rusqlite::Error),
+
+    #[error("create user failed: {0}")]
+    CreateUser(#[source] rusqlite::Error),
+
+    #[error("query user failed: {0}")]
+    QueryUser(#[source] rusqlite::Error),
+
+    #[error("update user failed: {0}")]
+    UpdateUser(#[source] rusqlite::Error),
 }
 
 pub type CheckpointResult<T> = Result<T, CheckpointError>;

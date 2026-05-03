@@ -6,7 +6,7 @@
 // 核心概念：
 // - Segment：一组连续同类工具事件的合并
 // - Turn：两个用户消息之间的所有活动（assistant + tools）
-// - 完成态："Worked for Xm Ys" 折叠
+// - 完成态："工作 Xm Ys" 折叠
 // - 运行中态：实时累积摘要 + 脉冲指示
 //
 // 依赖：view_model.js (escHtml, jsStr)
@@ -19,7 +19,7 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 
 // ============================================================
-// Tool 分类
+// Tool 分类 + 中文显示名
 // ============================================================
 
 /**
@@ -61,6 +61,22 @@ var TOOL_MAP = {
 };
 
 /**
+ * 工具技术名 → 中文显示名。未列出时回退到原 tool_name。
+ */
+var DISPLAY_NAMES = {
+  'Read': '读取文件', 'LS': '列出目录', 'LSP': 'LSP',
+  'Glob': '搜索文件', 'Grep': '搜索内容',
+  'WebFetch': '获取网页', 'WebSearch': '搜索网络',
+  'Bash': '运行命令', 'Shell': '运行命令',
+  'Edit': '编辑文件', 'Write': '写入文件', 'NotebookEdit': '编辑笔记本',
+  'exec_command': '运行命令', 'write_stdin': '输入命令',
+  'ReadFile': '读取文件', 'List': '列出目录',
+  'web_search': '搜索网络', 'ApplyPatch': '应用补丁',
+  'WriteFile': '写入文件', 'StrReplaceFile': '编辑文件',
+  'read_file': '读取文件', 'write_file': '写入文件', 'run_shell_command': '运行命令',
+};
+
+/**
  * 获取工具的分类信息。
  * @param {string} toolName
  * @returns {{ category: string, subcategory: string }|null}
@@ -70,6 +86,75 @@ function classifyTool(toolName) {
   var entry = TOOL_MAP[toolName];
   if (!entry) return null;
   return { category: entry[0], subcategory: entry[1] };
+}
+
+// ============================================================
+// 命令/路径提取 + 脱敏
+// ============================================================
+
+/**
+ * 从 preview 中提取文件 basename（最后一段路径）。
+ * "src/main.rs" → "main.rs"
+ * "/Users/x/proj/lib.rs" → "lib.rs"
+ */
+function extractFileName(preview) {
+  if (!preview) return '';
+  var s = preview.trim();
+  // 去掉常见前缀标记
+  s = s.replace(/^(file_path:?\s*|path:?\s*|reading:?\s*)/i, '');
+  // 取最后一段
+  var parts = s.split('/');
+  var last = parts[parts.length - 1] || s;
+  // 截断过长名字
+  if (last.length > 40) last = last.substring(0, 37) + '...';
+  return last || s;
+}
+
+/**
+ * 从 tool event 提取可读标签和详情。
+ */
+function extractCommand(item) {
+  var preview = item.tool_input_preview || '';
+  var tool = item.tool_name || '';
+  var info = classifyTool(tool);
+  var label = DISPLAY_NAMES[tool] || tool;
+
+  if (!info) return { label: label, detail: preview };
+  var sub = info.subcategory;
+
+  if (sub === 'file' || sub === 'edit') {
+    return { label: label, detail: extractFileName(preview) };
+  }
+  if (sub === 'command') {
+    return { label: label, detail: preview };
+  }
+  if (sub === 'search') {
+    return { label: label, detail: preview };
+  }
+  return { label: label, detail: preview };
+}
+
+/**
+ * 对 preview 文本中的敏感值做脱敏。
+ * 长 hex token、password=xxx、token=xxx 等替换为 ****。
+ */
+var SENSITIVE_PATTERNS = [
+  /\b([A-Za-z0-9]{40,})\b/g,
+  /\b(password\s*[=:]\s*)\S+/gi,
+  /\b(token\s*[=:]\s*)\S+/gi,
+  /\b(secret\s*[=:]\s*)\S+/gi,
+];
+
+function maskSensitive(text) {
+  if (!text) return text;
+  var result = text;
+  // 长 hex string
+  result = result.replace(/\b([A-Za-z0-9]{40,})\b/g, '****');
+  // key=value 敏感字段：保留 key，mask value
+  result = result.replace(/\b(password\s*[=:]\s*)\S+/gi, '$1****');
+  result = result.replace(/\b(token\s*[=:]\s*)\S+/gi, '$1****');
+  result = result.replace(/\b(secret\s*[=:]\s*)\S+/gi, '$1****');
+  return result;
 }
 
 // ============================================================
@@ -92,6 +177,82 @@ function formatDuration(ms) {
   var hours = Math.floor(mins / 60);
   var remainMins = mins % 60;
   return hours + 'h ' + remainMins + 'm';
+}
+
+// ============================================================
+// Turn 工作阶段分类
+// ============================================================
+
+/**
+ * 根据 turn 内 segment 组合推断工作阶段。
+ * 返回中文标签，用于 turn banner 前缀。
+ *
+ * 分类逻辑：
+ * - 只有文件读取/搜索 → 理解任务
+ * - 只有命令 → 执行命令
+ * - 命令 + 文件/搜索 → 检查状态
+ * - 只有编辑 → 修改文件
+ * - 编辑 + 命令 → 验证结果
+ * - 编辑 + 文件/搜索（无命令）→ 修改文件
+ */
+var PHASE_LABELS = {
+  'understand': '理解任务',
+  'diagnose':   '检查状态',
+  'execute':    '执行命令',
+  'edit':       '修改文件',
+  'verify':     '验证结果',
+};
+
+function classifyTurnPhase(segments) {
+  var hasFile = false, hasSearch = false, hasCommand = false, hasEdit = false;
+  for (var i = 0; i < segments.length; i++) {
+    var seg = segments[i];
+    if (seg.type === 'explore') {
+      if (seg.fileCount > 0) hasFile = true;
+      if (seg.searchCount > 0) hasSearch = true;
+      if (seg.commandCount > 0) hasCommand = true;
+    } else if (seg.type === 'edit') {
+      hasEdit = true;
+    }
+  }
+
+  if (!hasEdit && !hasCommand && (hasFile || hasSearch)) return 'understand';
+  if (hasEdit && hasCommand) return 'verify';
+  if (hasEdit) return 'edit';
+  if (hasCommand && !hasFile && !hasSearch) return 'execute';
+  if (hasCommand) return 'diagnose';
+  if (hasFile || hasSearch) return 'understand';
+  return '';
+}
+
+/**
+ * 生成 turn banner 的标签 HTML（供 bridge/relay 渲染器使用）。
+ * 包含阶段标签 + 时长 + 动作数。
+ */
+function turnBannerLabel(group) {
+  var html = '';
+  if (group.isRunning) {
+    html += '<span class="act-pulse"></span>';
+    html += '<span class="act-turn-label">工作中 ' + formatDuration(group.duration || 1) + '</span>';
+  } else {
+    // 获取阶段标签
+    var toolSegs = [];
+    for (var i = 0; i < group.segments.length; i++) {
+      var s = group.segments[i];
+      if (s.type !== 'user' && s.type !== 'assistant') toolSegs.push(s);
+    }
+    var phase = classifyTurnPhase(toolSegs);
+    var phaseLabel = phase ? (PHASE_LABELS[phase] || '') : '';
+    var durStr = formatDuration(group.duration || 1);
+    var parts = [];
+    if (phaseLabel) parts.push(phaseLabel);
+    if (durStr) parts.push(durStr);
+    html += '<span class="act-turn-label">' + (phaseLabel ? parts.join(' · ') : '工作 ' + parts.join(' · ')) + '</span>';
+  }
+  if (group.toolCount > 0) {
+    html += '<span class="act-turn-tools">' + group.toolCount + ' 个动作</span>';
+  }
+  return html;
 }
 
 // ============================================================
@@ -162,15 +323,42 @@ function _finalizeSeg(p) {
   var summary = '';
 
   if (p.category === 'explore') {
-    var parts = [];
-    if (c.file > 0) parts.push(c.file + (c.file === 1 ? ' file' : ' files'));
-    if (c.search > 0) parts.push(c.search + (c.search === 1 ? ' search' : ' searches'));
-    if (c.command > 0) parts.push(c.command + (c.command === 1 ? ' command' : ' commands'));
-    summary = parts.length ? parts.join(' · ') : 'explored';
+    var totalOps = (c.file || 0) + (c.search || 0) + (c.command || 0);
+    if (totalOps === 1) {
+      // 单操作：用真实文件名/命令
+      var item = p.items[0];
+      var cmd = extractCommand(item);
+      summary = cmd.label + ' ' + cmd.detail;
+    } else if (totalOps <= 3) {
+      // 少量：列出每个操作
+      var parts = [];
+      for (var i = 0; i < p.items.length; i++) {
+        var ci = extractCommand(p.items[i]);
+        var shortDetail = ci.detail.length > 25 ? ci.detail.substring(0, 22) + '...' : ci.detail;
+        parts.push(shortDetail);
+      }
+      summary = parts.join(' · ');
+    } else {
+      // 多操作：分类计数
+      var countParts = [];
+      if (c.file > 0) countParts.push('查看 ' + c.file + ' 个文件');
+      if (c.search > 0) countParts.push(c.search + ' 次搜索');
+      if (c.command > 0) countParts.push('运行 ' + c.command + ' 条命令');
+      summary = countParts.join(' · ');
+    }
   } else if (p.category === 'edit') {
     var editCount = c.edit || c.file || p.items.length;
-    summary = editCount + (editCount === 1 ? ' edit' : ' edits');
+    if (editCount === 1) {
+      var editItem = p.items[0];
+      var editCmd = extractCommand(editItem);
+      summary = '编辑 ' + editCmd.detail;
+    } else {
+      summary = '修改 ' + editCount + ' 个文件';
+    }
   }
+
+  // 折叠摘要也要脱敏
+  summary = maskSensitive(summary);
 
   return {
     type: p.category,
@@ -302,19 +490,19 @@ function renderSegmentCard(seg, idx) {
 
 /**
  * 渲染段内工具条目列表（展开时显示）。
- * @param {Segment} seg
- * @returns {string} HTML
+ * 使用中文工具名 + 脱敏后的 preview。
  */
 function renderSegmentDetail(seg) {
   if (!seg.items || !seg.items.length) return '';
   var html = '';
   for (var i = 0; i < seg.items.length; i++) {
     var item = seg.items[i];
-    var name = escHtml(item.tool_name || 'tool');
-    var preview = item.tool_input_preview ? escHtml(item.tool_input_preview) : '';
+    var cmd = extractCommand(item);
+    var label = escHtml(cmd.label);
+    var detail = cmd.detail ? escHtml(maskSensitive(cmd.detail)) : '';
     html += '<div class="act-item">';
-    html += '<span class="act-item-name">' + name + '</span>';
-    if (preview) html += '<code class="act-item-preview">' + preview + '</code>';
+    html += '<span class="act-item-name">' + label + '</span>';
+    if (detail) html += '<code class="act-item-preview">' + detail + '</code>';
     html += '</div>';
   }
   return html;
@@ -325,13 +513,8 @@ function renderSegmentDetail(seg) {
 // ============================================================
 
 /**
- * 渲染 Turn 组的标题栏。
- * 完成态："Worked for 3m 21s" + 工具数量 + 折叠切换
- * 运行中态：脉冲指示 + "Working" + 当前耗时
- *
- * @param {TurnGroup} group
- * @param {number} idx - turn 索引
- * @returns {string} HTML
+ * 渲染 Turn 组的完整标题栏 + 段卡片。
+ * 使用 turnBannerLabel 生成统一的中文标签（含工作阶段）。
  */
 function renderTurnBanner(group, idx) {
   if (!group.toolCount && group.segments.length === 0) return '';
@@ -339,19 +522,9 @@ function renderTurnBanner(group, idx) {
   var cls = group.isRunning ? 'act-turn act-running' : 'act-turn act-settled';
   var html = '<div class="' + cls + '" data-turn-idx="' + idx + '">';
 
-  // 标题栏
+  // 标题栏 — 使用统一的标签生成器
   html += '<div class="act-turn-bar"' + (!group.isRunning ? ' onclick="toggleTurnBody(this)"' : '') + '>';
-
-  if (group.isRunning) {
-    html += '<span class="act-pulse"></span>';
-    html += '<span class="act-turn-label">Working ' + escHtml(formatDuration(group.duration || 1)) + '</span>';
-  } else {
-    html += '<span class="act-turn-label">Worked for ' + escHtml(formatDuration(group.duration || 1)) + '</span>';
-  }
-
-  if (group.toolCount > 0) {
-    html += '<span class="act-turn-tools">Ran ' + group.toolCount + ' command' + (group.toolCount === 1 ? '' : 's') + '</span>';
-  }
+  html += turnBannerLabel(group);
 
   if (!group.isRunning && group.toolCount > 0) {
     html += '<span class="act-turn-chevron" id="act-turn-chevron-' + idx + '" style="display:none">&#x25B8;</span>';
@@ -431,5 +604,10 @@ if (typeof module !== 'undefined' && module.exports) {
     renderTurnBanner: renderTurnBanner,
     toggleActDetail: toggleActDetail,
     toggleTurnBody: toggleTurnBody,
+    extractFileName: extractFileName,
+    extractCommand: extractCommand,
+    maskSensitive: maskSensitive,
+    classifyTurnPhase: classifyTurnPhase,
+    turnBannerLabel: turnBannerLabel,
   };
 }

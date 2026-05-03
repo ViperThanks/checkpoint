@@ -242,7 +242,13 @@ fn handle_client(mut stream: UnixStream, store: &AuditStore, engine: &RuleEngine
             agent,
             device_id,
         } => {
-            handle_stop(&payload, agent.as_ref(), device_id.as_deref(), store, &mut stream);
+            handle_stop(
+                &payload,
+                agent.as_ref(),
+                device_id.as_deref(),
+                store,
+                &mut stream,
+            );
         }
     }
 }
@@ -382,13 +388,21 @@ fn handle_stop(
     // 2. Fallback: provider + project_path (covers jobs that haven't bound conversation_id yet)
     let matched_job = conversation_id
         .as_deref()
-        .and_then(|cid| store.find_running_job_by_conversation(provider, cid).ok().flatten())
+        .and_then(|cid| {
+            store
+                .find_running_job_by_conversation(provider, cid)
+                .ok()
+                .flatten()
+        })
         .or_else(|| {
             let project_path =
                 checkpoint_core::conversation::extract_project_path(agent_str, payload);
-            project_path
-                .as_deref()
-                .and_then(|pp| store.find_running_job_by_project(provider, pp).ok().flatten())
+            project_path.as_deref().and_then(|pp| {
+                store
+                    .find_running_job_by_project(provider, pp)
+                    .ok()
+                    .flatten()
+            })
         });
 
     if let Some(job) = matched_job {
@@ -403,8 +417,7 @@ fn handle_stop(
             );
         }
     } else {
-        let project_path =
-            checkpoint_core::conversation::extract_project_path(agent_str, payload);
+        let project_path = checkpoint_core::conversation::extract_project_path(agent_str, payload);
         log_info!(
             "stop hook received but no matching running job found (provider={}, conv={:?}, project={:?})",
             provider,
