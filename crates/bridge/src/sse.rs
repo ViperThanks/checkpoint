@@ -16,6 +16,9 @@ pub struct SseEvent {
     pub data: String,
 }
 
+/// 最大同时 SSE 客户端数。超出时拒绝新连接。
+const MAX_SSE_CLIENTS: usize = 20;
+
 /// 广播器：维护所有活跃 SSE 客户端的 channel 列表。
 pub struct SseBroadcaster {
     clients: Vec<mpsc::Sender<Option<SseEvent>>>,
@@ -35,11 +38,14 @@ impl SseBroadcaster {
         std::sync::Arc::new(std::sync::Mutex::new(Self::new()))
     }
 
-    /// 注册新客户端，返回事件接收端。发送 None 表示流结束。
-    pub fn add_client(&mut self) -> mpsc::Receiver<Option<SseEvent>> {
+    /// 注册新客户端，返回事件接收端。超过 MAX_SSE_CLIENTS 时返回 None。
+    pub fn add_client(&mut self) -> Option<mpsc::Receiver<Option<SseEvent>>> {
+        if self.clients.len() >= MAX_SSE_CLIENTS {
+            return None;
+        }
         let (tx, rx) = mpsc::channel();
         self.clients.push(tx);
-        rx
+        Some(rx)
     }
 
     /// 广播事件到所有活跃客户端。send 失败的客户端自动移除。

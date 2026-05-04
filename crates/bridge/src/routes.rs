@@ -35,6 +35,51 @@ use crate::sse::{self, SharedBroadcaster};
 use crate::ui;
 use base64::Engine;
 
+/// 登录速率限制：连续失败 N 次后锁定 LOGIN_LOCKOUT_SECS 秒。
+const MAX_LOGIN_FAILURES: u32 = 5;
+const LOGIN_LOCKOUT_SECS: u64 = 60;
+
+/// 全局登录限流状态。
+static LOGIN_GUARD: std::sync::Mutex<LoginGuard> = std::sync::Mutex::new(LoginGuard {
+    fail_count: 0,
+    locked_until: 0,
+});
+
+struct LoginGuard {
+    fail_count: u32,
+    locked_until: u64,
+}
+
+impl LoginGuard {
+    /// 检查是否被锁定。返回 true 表示允许尝试登录。
+    fn try_acquire(&mut self) -> bool {
+        let now = chrono::Utc::now().timestamp() as u64;
+        if self.locked_until > 0 && now < self.locked_until {
+            return false;
+        }
+        if self.locked_until > 0 && now >= self.locked_until {
+            self.fail_count = 0;
+            self.locked_until = 0;
+        }
+        true
+    }
+
+    fn record_success(&mut self) {
+        self.fail_count = 0;
+        self.locked_until = 0;
+    }
+
+    fn record_failure(&mut self) {
+        self.fail_count += 1;
+        if self.fail_count >= MAX_LOGIN_FAILURES {
+            self.locked_until = chrono::Utc::now().timestamp() as u64 + LOGIN_LOCKOUT_SECS;
+            eprintln!(
+                "agent-aspect-bridge: login locked for {LOGIN_LOCKOUT_SECS}s after {MAX_LOGIN_FAILURES} failures"
+            );
+        }
+    }
+}
+
 // 分页默认值 — 所有列表端点共享。pub 可见性供 jobs.rs 引用。
 pub const DEFAULT_PAGE_SIZE: usize = 20;
 pub const MAX_PAGE_SIZE: usize = 100;
@@ -50,18 +95,16 @@ const COMPACT_QUERY_LIMIT: usize = 5000;
 /// 时间窗口聚合的粒度：同一 tool+action 在 30s 内的事件合并为一组。
 const AGGREGATION_WINDOW_SECS: i64 = 30;
 
+/// POST body 最大字节数（10 MiB）。超出拒绝，防止内存耗尽。
+pub const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+
 /// 读取并解析请求体为 JSON，失败时返回 400 错误响应。
 /// 所有 POST handler 共用，消除重复的 body-reading 样板代码。
+/// 超过 MAX_BODY_BYTES 时返回 413。
 pub fn read_json_body(
     request: &mut tiny_http::Request,
 ) -> Result<serde_json::Value, tiny_http::ResponseBox> {
-    let mut body = String::new();
-    if let Err(e) = request.as_reader().read_to_string(&mut body) {
-        return Err(json_response(
-            400,
-            &serde_json::json!({"error": format!("read body: {e}")}),
-        ));
-    }
+    let body = read_body(request)?;
     match serde_json::from_str(&body) {
         Ok(v) => Ok(v),
         Err(e) => Err(json_response(
@@ -69,6 +112,38 @@ pub fn read_json_body(
             &serde_json::json!({"error": format!("parse json: {e}")}),
         )),
     }
+}
+
+/// 读取请求体（带大小限制），超过 MAX_BODY_BYTES 时返回 413。
+pub fn read_body(
+    request: &mut tiny_http::Request,
+) -> Result<String, tiny_http::ResponseBox> {
+    let mut buf = Vec::with_capacity(4096);
+    let reader = request.as_reader();
+    let mut tmp = [0u8; 8192];
+    loop {
+        match reader.read(&mut tmp) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&tmp[..n]);
+                if buf.len() > MAX_BODY_BYTES {
+                    return Err(json_response(
+                        413,
+                        &serde_json::json!({"error": "body too large"}),
+                    ));
+                }
+            }
+            Err(e) => {
+                return Err(json_response(
+                    400,
+                    &serde_json::json!({"error": format!("read body: {e}")}),
+                ));
+            }
+        }
+    }
+    String::from_utf8(buf).map_err(|e| {
+        json_response(400, &serde_json::json!({"error": format!("invalid utf8: {e}")}))
+    })
 }
 
 /// 构造 JSON 响应。所有 handler 的统一出口。
@@ -123,6 +198,14 @@ pub fn handle_post_login(
     request: &mut tiny_http::Request,
     bridge_token: &str,
 ) -> tiny_http::ResponseBox {
+    // 登录速率限制检查
+    {
+        let mut guard = LOGIN_GUARD.lock().unwrap();
+        if !guard.try_acquire() {
+            return json_response(429, &serde_json::json!({"error": "too many login attempts, try again later"}));
+        }
+    }
+
     let parsed = match read_json_body(request) {
         Ok(v) => v,
         Err(r) => return r,
@@ -131,12 +214,14 @@ pub fn handle_post_login(
     let username = match parsed.get("username").and_then(|v| v.as_str()) {
         Some(s) => s,
         None => {
+            LOGIN_GUARD.lock().unwrap().record_failure();
             return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
         }
     };
     let password = match parsed.get("password").and_then(|v| v.as_str()) {
         Some(s) => s,
         None => {
+            LOGIN_GUARD.lock().unwrap().record_failure();
             return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
         }
     };
@@ -146,6 +231,7 @@ pub fn handle_post_login(
     let user = match store.get_user_by_username(username) {
         Ok(Some(u)) => u,
         Ok(None) => {
+            LOGIN_GUARD.lock().unwrap().record_failure();
             return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
         }
         Err(e) => {
@@ -154,8 +240,8 @@ pub fn handle_post_login(
         }
     };
 
-    // 已禁用用户
     if user.disabled_at.is_some() {
+        LOGIN_GUARD.lock().unwrap().record_failure();
         return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
     }
 
@@ -164,8 +250,11 @@ pub fn handle_post_login(
         &user.password_hash,
         &user.password_salt,
     ) {
+        LOGIN_GUARD.lock().unwrap().record_failure();
         return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
     }
+
+    LOGIN_GUARD.lock().unwrap().record_success();
 
     let now = chrono::Utc::now().to_rfc3339();
     let _ = store.update_last_login(&user.id, &now);

@@ -105,14 +105,23 @@ fn resolve_mode() -> Mode {
         .unwrap_or(Mode::Guard)
 }
 
-/// 从 Unix socket 流中读取全部数据（直到 EOF）。
+/// IPC 消息最大字节数（1 MiB）。超出断开连接，防止内存耗尽。
+const MAX_IPC_MESSAGE_BYTES: usize = 1024 * 1024;
+
+/// 从 Unix socket 流中读取全部数据（直到 EOF 或超过大小限制）。
 fn read_fully(stream: &mut UnixStream) -> Option<String> {
     let mut buf = Vec::with_capacity(256 * 1024);
     let mut tmp = [0u8; 8192];
     loop {
         match stream.read(&mut tmp) {
             Ok(0) => break,
-            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+            Ok(n) => {
+                buf.extend_from_slice(&tmp[..n]);
+                if buf.len() > MAX_IPC_MESSAGE_BYTES {
+                    log_info!("IPC message too large ({} bytes), dropping connection", buf.len());
+                    return None;
+                }
+            }
             Err(e) => {
                 log_info!("read error: {e}");
                 return None;
@@ -524,7 +533,12 @@ fn main() {
     let sock_path = paths::socket_path();
     let db_path = paths::audit_db_path();
     if let Some(parent) = sock_path.parent() {
-        std::fs::create_dir_all(parent).ok();
+        let _ = std::fs::create_dir_all(parent);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+        }
     }
 
     // 清理可能残留的旧 socket 文件
@@ -533,7 +547,22 @@ fn main() {
     }
 
     let store = AuditStore::open(&db_path).expect("open audit store");
+
+    // 数据库文件权限限制为 owner-only
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600));
+    }
+
     let listener = UnixListener::bind(&sock_path).expect("bind unix socket");
+
+    // Socket 文件权限限制为 owner-only
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600));
+    }
 
     // 启动时按 retention_days 清理过期审计数据
     let config_path = Config::config_path();

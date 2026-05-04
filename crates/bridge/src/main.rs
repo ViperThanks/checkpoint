@@ -190,13 +190,21 @@ fn main() {
             if !sse::check_query_auth(request.url(), &token) {
                 let response =
                     routes::json_response(403, &serde_json::json!({"error": "unauthorized"}));
-                // SSE 需要在当前线程 respond（没有 spawn），直接处理
                 let _ = request.respond(response);
             } else {
                 let rx = broadcaster.lock().unwrap().add_client();
-                std::thread::spawn(move || {
-                    sse::handle_sse_raw(request, rx);
-                });
+                match rx {
+                    Some(rx) => std::thread::spawn(move || {
+                        sse::handle_sse_raw(request, rx);
+                    }),
+                    None => {
+                        let _ = request.respond(routes::json_response(
+                            429,
+                            &serde_json::json!({"error": "too many SSE connections"}),
+                        ));
+                        continue;
+                    }
+                };
             }
             continue;
         }

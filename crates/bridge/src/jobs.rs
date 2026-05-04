@@ -2000,24 +2000,11 @@ mod tests {
 
 // ---- HTTP handlers ----
 
-/// 读取并解析请求体为 JSON，失败时返回 400 错误响应。
+/// 读取并解析请求体为 JSON（带大小限制）。
 fn read_body(
     request: &mut tiny_http::Request,
 ) -> Result<serde_json::Value, tiny_http::ResponseBox> {
-    let mut body = String::new();
-    if let Err(e) = request.as_reader().read_to_string(&mut body) {
-        return Err(json_response(
-            400,
-            &serde_json::json!({"error": format!("read body: {e}")}),
-        ));
-    }
-    match serde_json::from_str(&body) {
-        Ok(v) => Ok(v),
-        Err(e) => Err(json_response(
-            400,
-            &serde_json::json!({"error": format!("parse json: {e}")}),
-        )),
-    }
+    crate::routes::read_json_body(request)
 }
 
 /// POST /jobs 处理器。
