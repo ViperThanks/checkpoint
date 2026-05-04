@@ -11,6 +11,7 @@
 //! - context_strategy 控制日志截断：none / last_50_lines / last_100_lines / full_log
 
 use checkpoint_core::audit::AuditStore;
+use checkpoint_core::error::CheckpointError;
 use checkpoint_core::store::workflows::WorkflowStepRow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -468,7 +469,7 @@ pub fn handle_get_workflows(
     };
 
     let items: Vec<serde_json::Value> = workflows.iter().map(|wf| {
-        let (total, succeeded, failed, pending) = store.workflow_step_counts(&wf.id).unwrap_or((0, 0, 0, 0));
+        let (total, succeeded, failed, pending, _skipped) = store.workflow_step_counts(&wf.id).unwrap_or((0, 0, 0, 0, 0));
         serde_json::json!({
             "id": wf.id,
             "name": wf.name,
@@ -526,7 +527,7 @@ pub fn handle_get_workflow(
         })
     }).collect();
 
-    let (total, succeeded, failed, pending) = store.workflow_step_counts(workflow_id).unwrap_or((0, 0, 0, 0));
+    let (total, succeeded, failed, pending, _skipped) = store.workflow_step_counts(workflow_id).unwrap_or((0, 0, 0, 0, 0));
 
     json_response(200, &serde_json::json!({
         "id": wf.id,
@@ -592,7 +593,8 @@ pub fn handle_delete_workflow(
     match store.delete_workflow(workflow_id) {
         Ok(true) => json_response(200, &serde_json::json!({"id": workflow_id, "status": "deleted"})),
         Ok(false) => json_response(404, &serde_json::json!({"error": "workflow not found"})),
-        Err(_) => json_response(400, &serde_json::json!({"error": "cannot delete running workflow"})),
+        Err(CheckpointError::WorkflowNotRunning) => json_response(400, &serde_json::json!({"error": "cannot delete running workflow"})),
+        Err(e) => json_response(500, &serde_json::json!({"error": e.to_string()})),
     }
 }
 

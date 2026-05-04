@@ -152,22 +152,23 @@ impl AuditStore {
     }
 
     /// 删除工作流及其所有步骤。只允许 draft/failed/cancelled 状态。
-    /// 返回：Ok(true) = 已删除，Ok(false) = not found，Err = running 或其他不可删除状态。
+    /// 返回：Ok(true) = 已删除，Ok(false) = not found，Err = running。
     pub fn delete_workflow(&self, id: &str) -> CheckpointResult<bool> {
         let wf = self.get_workflow(id)?;
         match wf {
-            Some(w) if w.status == "running" => {
-                Err(CheckpointError::UpdateWorkflow(rusqlite::Error::StatementChangedRows(0)))
-            }
+            Some(w) if w.status == "running" => Err(CheckpointError::WorkflowNotRunning),
             Some(_) => {
-                self.conn.execute(
+                let tx = self.conn.unchecked_transaction()
+                    .map_err(CheckpointError::UpdateWorkflow)?;
+                tx.execute(
                     "DELETE FROM workflow_steps WHERE workflow_id = ?1",
                     rusqlite::params![id],
                 ).map_err(CheckpointError::UpdateWorkflowStep)?;
-                self.conn.execute(
+                tx.execute(
                     "DELETE FROM workflows WHERE id = ?1",
                     rusqlite::params![id],
                 ).map_err(CheckpointError::UpdateWorkflow)?;
+                tx.commit().map_err(CheckpointError::UpdateWorkflow)?;
                 Ok(true)
             }
             None => Ok(false),
@@ -347,19 +348,20 @@ impl AuditStore {
         Ok(rows)
     }
 
-    /// 统计工作流中各状态的步骤数。
-    pub fn workflow_step_counts(&self, workflow_id: &str) -> CheckpointResult<(i64, i64, i64, i64)> {
-        let (total, succeeded, failed, pending): (i64, i64, i64, i64) = self.conn.query_row(
+    /// 统计工作流中各状态的步骤数。(total, succeeded, failed, pending, skipped)
+    pub fn workflow_step_counts(&self, workflow_id: &str) -> CheckpointResult<(i64, i64, i64, i64, i64)> {
+        let (total, succeeded, failed, pending, skipped): (i64, i64, i64, i64, i64) = self.conn.query_row(
             "SELECT
                 COUNT(*),
                 COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN status IN ('failed', 'cancelled') THEN 1 ELSE 0 END), 0),
-                COALESCE(SUM(CASE WHEN status IN ('pending', 'running') THEN 1 ELSE 0 END), 0)
+                COALESCE(SUM(CASE WHEN status IN ('pending', 'running') THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END), 0)
              FROM workflow_steps WHERE workflow_id = ?1",
             rusqlite::params![workflow_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
         ).map_err(CheckpointError::QueryWorkflowStep)?;
-        Ok((total, succeeded, failed, pending))
+        Ok((total, succeeded, failed, pending, skipped))
     }
 }
 
@@ -455,11 +457,12 @@ mod tests {
 
         store.update_workflow_step_status("s1", "succeeded", Some(now)).unwrap();
 
-        let (total, succeeded, failed, pending) = store.workflow_step_counts("wf1").unwrap();
+        let (total, succeeded, failed, pending, skipped) = store.workflow_step_counts("wf1").unwrap();
         assert_eq!(total, 3);
         assert_eq!(succeeded, 1);
         assert_eq!(failed, 0);
         assert_eq!(pending, 2);
+        assert_eq!(skipped, 0);
     }
 
     #[test]
@@ -468,11 +471,12 @@ mod tests {
         let now = "2026-05-04T10:00:00Z";
 
         store.insert_workflow("wf-empty", "Empty", "", now).unwrap();
-        let (total, succeeded, failed, pending) = store.workflow_step_counts("wf-empty").unwrap();
+        let (total, succeeded, failed, pending, skipped) = store.workflow_step_counts("wf-empty").unwrap();
         assert_eq!(total, 0);
         assert_eq!(succeeded, 0);
         assert_eq!(failed, 0);
         assert_eq!(pending, 0);
+        assert_eq!(skipped, 0);
     }
 
     #[test]
