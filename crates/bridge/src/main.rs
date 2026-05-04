@@ -590,6 +590,28 @@ fn main() {
                         }
                     }
                 }
+                // GET /workflows/:id/steps/:step_id/logs — 获取步骤的 job 日志
+                (true, _, p) if p.starts_with("/workflows/") && p.contains("/steps/") && p.ends_with("/logs") => {
+                    if !auth::check_auth(&request, &token) {
+                        routes::json_response(403, &serde_json::json!({"error": "unauthorized"}))
+                    } else {
+                        // 解析 /workflows/{wf_id}/steps/{step_id}/logs
+                        let path = &p["/workflows/".len()..];
+                        let parts: Vec<&str> = path.splitn(3, "/steps/").collect();
+                        if parts.len() == 2 {
+                            let wf_id = parts[0];
+                            let step_and_rest = parts[1];
+                            let step_id = step_and_rest.trim_end_matches("/logs");
+                            if wf_id.is_empty() || step_id.is_empty() {
+                                routes::json_response(400, &serde_json::json!({"error": "missing ids"}))
+                            } else {
+                                workflows::handle_get_workflow_step_logs(&ctx, wf_id, step_id, &request)
+                            }
+                        } else {
+                            routes::json_response(400, &serde_json::json!({"error": "invalid path"}))
+                        }
+                    }
+                }
                 (true, _, p) if p.starts_with("/workflows/") => {
                     if !auth::check_auth(&request, &token) {
                         routes::json_response(403, &serde_json::json!({"error": "unauthorized"}))

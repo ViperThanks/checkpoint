@@ -296,7 +296,8 @@ function renderWfDetail() {
         '</div>' +
         (s.project_path ? '<div style="font-size:.75rem;color:var(--dim);margin-top:2px">' + esc(s.project_path) + '</div>' : '') +
         '<div style="font-size:.8rem;margin-top:4px;white-space:pre-wrap;color:var(--text)">' + esc(s.prompt) + '</div>' +
-        (s.job_id ? '<div style="font-size:.72rem;color:var(--dim);margin-top:4px">Job: ' + esc(s.job_id.substring(0, 8)) + '...</div>' : '') +
+        (s.job_id ? '<div style="font-size:.72rem;color:var(--dim);margin-top:4px">Job: ' + esc(s.job_id.substring(0, 8)) + '... <button class="btn btn-sm" style="font-size:.68rem;padding:1px 6px" onclick="toggleStepLogs(\'' + jsStr(s.id) + '\',\'' + jsStr(wf.id) + '\')">日志</button></div>' : '') +
+        '<div id="step-logs-' + esc(s.id) + '"></div>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -477,6 +478,48 @@ function startWfPolling() {
 
 function stopWfPolling() {
   if (WFS.pollTimer) { clearInterval(WFS.pollTimer); WFS.pollTimer = null; }
+}
+
+/* ---------- Step Logs ---------- */
+const WFS_LOGS = {}  // step_id -> { open, loading }
+
+function toggleStepLogs(stepId, workflowId) {
+  const el = document.getElementById('step-logs-' + stepId)
+  if (!el) return
+
+  if (WFS_LOGS[stepId] && WFS_LOGS[stepId].loading) return
+
+  if (WFS_LOGS[stepId] && WFS_LOGS[stepId].open) {
+    el.innerHTML = ''
+    WFS_LOGS[stepId].open = false
+    return
+  }
+
+  WFS_LOGS[stepId] = { open: true, loading: true }
+  el.innerHTML = '<div style="padding:8px;color:var(--dim);font-size:.75rem">加载日志...</div>'
+
+  api('/workflows/' + workflowId + '/steps/' + stepId + '/logs?limit=500').then(data => {
+    WFS_LOGS[stepId].loading = false
+    if (data.error) {
+      el.innerHTML = '<div style="padding:8px;color:var(--red);font-size:.75rem">' + esc(data.error) + '</div>'
+      return
+    }
+    const logs = data.logs || []
+    if (logs.length === 0) {
+      el.innerHTML = '<div style="padding:8px;color:var(--dim);font-size:.75rem">暂无日志</div>'
+      return
+    }
+    const lines = logs.map(l => {
+      const ts = l.timestamp ? '<span style="color:var(--dim)">' + esc(l.timestamp.substring(11, 19)) + '</span> ' : ''
+      const cls = (l.stream === 'stderr' || l.stream === 'STDERR') ? 'style="color:var(--red)"' : ''
+      return '<div ' + cls + '>' + ts + esc(l.chunk) + '</div>'
+    }).join('')
+    el.innerHTML =
+      '<div style="max-height:300px;overflow-y:auto;padding:8px;background:var(--bg);border-radius:6px;margin:4px 0;font-family:monospace;font-size:.72rem;line-height:1.5">' +
+        lines +
+      '</div>' +
+      (data.total > logs.length ? '<div style="padding:4px;font-size:.68rem;color:var(--dim)">显示 ' + logs.length + '/' + data.total + '</div>' : '')
+  })
 }
 
 /* ---------- Helpers ---------- */

@@ -13,6 +13,7 @@
 use checkpoint_core::audit::AuditStore;
 use checkpoint_core::error::CheckpointError;
 use checkpoint_core::store::workflows::WorkflowStepRow;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -245,6 +246,8 @@ fn execute_workflow_inner(
         .map_err(|e| ExecuteError::Db(e.to_string()))?;
 
     let mut previous_logs: Option<String> = None;
+    // 记录每个 step_order 对应的日志，支持 context_from_step 按步索引读取
+    let mut step_logs: HashMap<i64, String> = HashMap::new();
 
     for step in &steps {
         // 检查取消
@@ -256,15 +259,22 @@ fn execute_workflow_inner(
         // 跳过已完成的步骤（重试场景）
         if step.status == "succeeded" {
             if let Some(ref job_id) = step.job_id {
-                previous_logs = Some(read_job_logs_for_context(
+                let logs = read_job_logs_for_context(
                     &store, job_id, &step.context_strategy,
-                ));
+                );
+                // 同时存入 step_logs 供后续 step 的 context_from_step 使用
+                step_logs.insert(step.step_order, logs.clone());
+                previous_logs = Some(logs);
             }
             continue;
         }
 
-        // 构建 prompt：如果有前一步的日志且当前步骤配置了 context_strategy
-        let prompt = build_step_prompt(step, previous_logs.as_deref());
+        // 构建 prompt：优先使用 context_from_step 指定的 step 日志，否则 fallback 到紧邻前一步
+        let context_logs = step
+            .context_from_step
+            .and_then(|order| step_logs.get(&order).map(|s| s.as_str()))
+            .or(previous_logs.as_deref());
+        let prompt = build_step_prompt(step, context_logs);
 
         // 更新步骤状态为 running
         store.update_workflow_step_status(&step.id, "running", None)
@@ -314,10 +324,12 @@ fn execute_workflow_inner(
                     return Err(ExecuteError::JobFailed(reason));
                 }
 
-                // 读取日志作为下一步上下文
-                previous_logs = Some(read_job_logs_for_context(
+                // 读取日志作为下一步上下文，同时存入 step_logs
+                let logs = read_job_logs_for_context(
                     &store, &job_id, &step.context_strategy,
-                ));
+                );
+                step_logs.insert(step.step_order, logs.clone());
+                previous_logs = Some(logs);
 
                 broadcaster.lock().unwrap().broadcast(crate::sse::SseEvent {
                     event_type: "workflow_step_status".to_string(),
@@ -420,6 +432,23 @@ pub fn handle_post_workflows(
         return json_response(400, &serde_json::json!({"error": "steps cannot be empty"}));
     }
 
+    // 先校验所有 steps，再插入 DB，避免校验失败留下孤儿 workflow 记录
+    let valid_strategies = ["none", "last_50_lines", "last_100_lines", "full_log"];
+    for (i, step_val) in steps.iter().enumerate() {
+        let prompt = step_val.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+        if prompt.trim().is_empty() {
+            return json_response(400, &serde_json::json!({
+                "error": format!("step {} prompt cannot be empty", i)
+            }));
+        }
+        let context_strategy = step_val.get("context_strategy").and_then(|v| v.as_str()).unwrap_or("none");
+        if !valid_strategies.contains(&context_strategy) {
+            return json_response(400, &serde_json::json!({
+                "error": format!("step {} invalid context_strategy '{}', allowed: {:?}", i, context_strategy, valid_strategies)
+            }));
+        }
+    }
+
     let store = ctx.store.lock().unwrap();
     let now = chrono::Utc::now().to_rfc3339();
     let wf_id = uuid::Uuid::now_v7().to_string();
@@ -463,6 +492,7 @@ pub fn handle_get_workflows(
         .unwrap_or(0);
 
     let store = ctx.store.lock().unwrap();
+    let total = store.count_workflows().unwrap_or(0);
     let workflows = match store.list_workflows(limit, offset) {
         Ok(w) => w,
         Err(e) => return json_response(500, &serde_json::json!({"error": e.to_string()})),
@@ -488,6 +518,7 @@ pub fn handle_get_workflows(
 
     json_response(200, &serde_json::json!({
         "workflows": items,
+        "total": total,
         "limit": limit,
         "offset": offset,
     }))
@@ -682,4 +713,69 @@ pub fn handle_post_workflow_cancel(
         Ok(false) => json_response(400, &serde_json::json!({"error": "workflow not in cancellable state"})),
         Err(e) => json_response(500, &serde_json::json!({"error": e})),
     }
+}
+
+/// GET /workflows/:id/steps/:step_id/logs — 获取步骤的 job 日志。
+pub fn handle_get_workflow_step_logs(
+    ctx: &crate::context::AppContext,
+    workflow_id: &str,
+    step_id: &str,
+    request: &tiny_http::Request,
+) -> tiny_http::ResponseBox {
+    let url = request.url();
+    let limit = crate::routes::query_param(url, "limit")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(500)
+        .min(2000);
+    let offset = crate::routes::query_param(url, "offset")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
+
+    let store = ctx.store.lock().unwrap();
+
+    // 验证 step 属于该 workflow
+    let step = match store.get_workflow_step(step_id) {
+        Ok(Some(s)) if s.workflow_id == workflow_id => s,
+        Ok(Some(_)) => return json_response(400, &serde_json::json!({"error": "step does not belong to this workflow"})),
+        Ok(None) => return json_response(404, &serde_json::json!({"error": "step not found"})),
+        Err(e) => return json_response(500, &serde_json::json!({"error": e.to_string()})),
+    };
+
+    let job_id = match &step.job_id {
+        Some(id) => id.clone(),
+        None => return json_response(200, &serde_json::json!({
+            "step_id": step_id,
+            "status": step.status,
+            "logs": [],
+            "total": 0,
+        })),
+    };
+
+    // 读取 job logs
+    let all_logs = match store.get_job_logs(&job_id) {
+        Ok(logs) => logs,
+        Err(e) => return json_response(500, &serde_json::json!({"error": format!("query job logs: {e}")})),
+    };
+
+    let total = all_logs.len();
+    let logs: Vec<serde_json::Value> = all_logs
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|l| serde_json::json!({
+            "stream": l.stream,
+            "chunk": l.chunk,
+            "timestamp": l.timestamp,
+        }))
+        .collect();
+
+    json_response(200, &serde_json::json!({
+        "step_id": step_id,
+        "job_id": job_id,
+        "status": step.status,
+        "logs": logs,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }))
 }
