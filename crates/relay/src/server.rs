@@ -13,7 +13,7 @@ use crate::register;
 use crate::ws;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post, put};
 use std::sync::Arc;
 
 /// POST body 最大字节数（1 MiB）。超出时 axum 返回 413。
@@ -50,6 +50,28 @@ pub fn app(state: Arc<crate::AppState>) -> Router {
         .route("/api/jobs/{id}/cancel", post(crate::http::proxy_post))
         .route("/api/jobs/{id}/logs/delta", post(crate::http::proxy_post))
         .route("/api/decide", post(crate::http::proxy_post))
+        // workflow 代理路由
+        .route("/api/workflows", get(crate::http::proxy_get))
+        .route("/api/workflows", post(crate::http::proxy_post))
+        .route("/api/workflows/{id}", get(crate::http::proxy_get))
+        .route("/api/workflows/{id}", put(crate::http::proxy_put))
+        .route("/api/workflows/{id}", delete(crate::http::proxy_delete))
+        .route(
+            "/api/workflows/{id}/run",
+            post(crate::http::proxy_post),
+        )
+        .route(
+            "/api/workflows/{id}/cancel",
+            post(crate::http::proxy_post),
+        )
+        .route(
+            "/api/workflows/{id}/steps/reorder",
+            put(crate::http::proxy_put),
+        )
+        .route(
+            "/api/workflows/{id}/steps/{step_id}/logs",
+            get(crate::http::proxy_get),
+        )
         .route("/", get(crate::mobile_ui::serve_ui))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)

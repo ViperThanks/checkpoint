@@ -30,16 +30,29 @@ const ALLOWED_GET_PATHS: &[&str] = &[
     "/run/context",
     "/jobs",
     "/conversations",
+    "/workflows",
 ];
 
 /// 允许代理的 GET 路径前缀（前缀匹配）。
-const ALLOWED_GET_PREFIXES: &[&str] = &["/conversations/", "/jobs/"];
+const ALLOWED_GET_PREFIXES: &[&str] = &["/conversations/", "/jobs/", "/workflows/"];
 
 /// 允许代理的 POST 路径（精确匹配）。
-const ALLOWED_POST_PATHS: &[&str] = &["/jobs", "/decide"];
+const ALLOWED_POST_PATHS: &[&str] = &["/jobs", "/decide", "/workflows"];
 
 /// 允许代理的 POST 路径前缀（前缀匹配）。
-const ALLOWED_POST_PREFIXES: &[&str] = &["/jobs/"];
+const ALLOWED_POST_PREFIXES: &[&str] = &["/jobs/", "/workflows/"];
+
+/// 允许代理的 PUT 路径（精确匹配）。
+const ALLOWED_PUT_PATHS: &[&str] = &[];
+
+/// 允许代理的 PUT 路径前缀（前缀匹配）。
+const ALLOWED_PUT_PREFIXES: &[&str] = &["/workflows/"];
+
+/// 允许代理的 DELETE 路径（精确匹配）。
+const ALLOWED_DELETE_PATHS: &[&str] = &[];
+
+/// 允许代理的 DELETE 路径前缀（前缀匹配）。
+const ALLOWED_DELETE_PREFIXES: &[&str] = &["/workflows/"];
 
 /// GET 请求代理入口：无 body。
 pub async fn proxy_get(
@@ -62,6 +75,29 @@ pub async fn proxy_post(
     body: String,
 ) -> Response {
     proxy_request(state, client, method, uri, headers, Some(body)).await
+}
+
+/// PUT 请求代理入口：携带 body 透传。
+pub async fn proxy_put(
+    State(state): State<Arc<crate::AppState>>,
+    client: VerifiedClient,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    proxy_request(state, client, method, uri, headers, Some(body)).await
+}
+
+/// DELETE 请求代理入口：无 body。
+pub async fn proxy_delete(
+    State(state): State<Arc<crate::AppState>>,
+    client: VerifiedClient,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Response {
+    proxy_request(state, client, method, uri, headers, None).await
 }
 
 /// 核心代理逻辑：路径白名单检查 → 构造 ProxyRequest → 通过 WS 发送到 Bridge → 等待响应。
@@ -87,6 +123,8 @@ async fn proxy_request(
     // 路径白名单校验
     let is_get = method == Method::GET;
     let is_post = method == Method::POST;
+    let is_put = method == Method::PUT;
+    let is_delete = method == Method::DELETE;
     let allowed = if is_get {
         ALLOWED_GET_PATHS.contains(&bridge_path.as_str())
             || ALLOWED_GET_PREFIXES
@@ -95,6 +133,16 @@ async fn proxy_request(
     } else if is_post {
         ALLOWED_POST_PATHS.contains(&bridge_path.as_str())
             || ALLOWED_POST_PREFIXES
+                .iter()
+                .any(|p| bridge_path.starts_with(p))
+    } else if is_put {
+        ALLOWED_PUT_PATHS.contains(&bridge_path.as_str())
+            || ALLOWED_PUT_PREFIXES
+                .iter()
+                .any(|p| bridge_path.starts_with(p))
+    } else if is_delete {
+        ALLOWED_DELETE_PATHS.contains(&bridge_path.as_str())
+            || ALLOWED_DELETE_PREFIXES
                 .iter()
                 .any(|p| bridge_path.starts_with(p))
     } else {
