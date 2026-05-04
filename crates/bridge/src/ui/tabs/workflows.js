@@ -9,6 +9,37 @@ const WFS = {
   steps: [{ provider: 'claude_code', project_path: '', prompt: '', context_strategy: 'none' }]
 };
 
+const WF_TEMPLATES = [
+  {
+    id: 'code-review',
+    name: '代码审查链',
+    description: '先运行测试，再审查代码变更',
+    steps: [
+      { provider: 'claude_code', project_path: '', prompt: '运行 cargo test 并报告测试结果', context_strategy: 'none' },
+      { provider: 'claude_code', project_path: '', prompt: '根据测试结果，审查最近的代码变更，检查潜在问题', context_strategy: 'last_50_lines' }
+    ]
+  },
+  {
+    id: 'test-deploy',
+    name: '测试 + 构建验证',
+    description: '冒烟测试后验证构建',
+    steps: [
+      { provider: 'claude_code', project_path: '', prompt: '运行 scripts/smoke_test.sh 并报告结果', context_strategy: 'none' },
+      { provider: 'claude_code', project_path: '', prompt: '运行 cargo build --release 并报告构建结果', context_strategy: 'last_50_lines' }
+    ]
+  },
+  {
+    id: 'refactor-chain',
+    name: '重构链',
+    description: '分析 → 重构 → 测试验证',
+    steps: [
+      { provider: 'claude_code', project_path: '', prompt: '分析当前代码结构，识别可以重构的模块', context_strategy: 'none' },
+      { provider: 'claude_code', project_path: '', prompt: '根据分析结果执行重构，保持功能不变', context_strategy: 'last_100_lines' },
+      { provider: 'claude_code', project_path: '', prompt: '运行测试验证重构没有破坏现有功能', context_strategy: 'last_50_lines' }
+    ]
+  }
+];
+
 window.WFS = WFS;
 
 /* ---------- Layout ---------- */
@@ -65,7 +96,13 @@ function renderWfCreateForm() {
 
   el.innerHTML =
     '<div style="display:flex;flex-direction:column;gap:10px">' +
-      '<input class="input" id="wf-name" placeholder="工作流名称">' +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+        '<input class="input" id="wf-name" placeholder="工作流名称" style="flex:1">' +
+        '<select class="select" id="wf-template" onchange="applyWfTemplate()" style="width:140px">' +
+          '<option value="">从模板创建...</option>' +
+          WF_TEMPLATES.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('') +
+        '</select>' +
+      '</div>' +
       '<input class="input" id="wf-desc" placeholder="描述（可选）">' +
       '<div style="font-size:.8rem;color:var(--dim)">步骤（按顺序执行）</div>' +
       '<div id="wf-steps-list">' + stepsHtml + '</div>' +
@@ -82,6 +119,21 @@ function toggleWfCreate() {
   const el = document.getElementById('wf-create-form');
   if (el) el.classList.toggle('hidden', !WFS.createOpen);
   if (WFS.createOpen) renderWfCreateForm();
+}
+
+function applyWfTemplate() {
+  const sel = document.getElementById('wf-template');
+  if (!sel || !sel.value) return;
+  const tpl = WF_TEMPLATES.find(t => t.id === sel.value);
+  if (!tpl) return;
+
+  document.getElementById('wf-name').value = tpl.name;
+  document.getElementById('wf-desc').value = tpl.description;
+  WFS.steps = tpl.steps.map(s => ({...s}));
+  renderWfCreateForm();
+  // 恢复 template selector 值（renderWfCreateForm 会重建 DOM）
+  const newSel = document.getElementById('wf-template');
+  if (newSel) newSel.value = tpl.id;
 }
 
 function addWfStep() {
@@ -198,7 +250,8 @@ function renderWfDetail() {
 
   const wf = WFS.selected;
   const badge = wfStatusBadge(wf.status);
-  const canRun = wf.status === 'draft' || wf.status === 'failed' || wf.status === 'cancelled';
+  const canRun = wf.status === 'draft';
+  const canRetry = wf.status === 'failed' || wf.status === 'cancelled';
   const canCancel = wf.status === 'running';
   const canEdit = wf.status !== 'running';
 
@@ -245,6 +298,7 @@ function renderWfDetail() {
       badge +
       '<div style="margin-left:auto;display:flex;gap:8px">' +
         (canRun ? '<button class="btn btn-primary btn-sm" onclick="runWorkflow(\'' + wf.id + '\')">执行</button>' : '') +
+        (canRetry ? '<button class="btn btn-primary btn-sm" onclick="runWorkflow(\'' + wf.id + '\')">重试</button>' : '') +
         (canCancel ? '<button class="btn btn-sm" style="color:var(--red)" onclick="cancelWorkflow(\'' + wf.id + '\')">取消</button>' : '') +
         (canEdit ? '<button class="btn btn-sm" onclick="startWfEdit()">编辑</button>' : '') +
         (canEdit ? '<button class="btn btn-sm" style="color:var(--red)" onclick="deleteWorkflow(\'' + wf.id + '\')">删除</button>' : '') +
