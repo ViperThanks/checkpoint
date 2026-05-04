@@ -90,6 +90,7 @@ fn main() {
     let workflow_runner = Arc::new(workflows::WorkflowRunner::new(
         paths::audit_db_path(),
         broadcaster.clone(),
+        job_runner.clone(),
     ));
 
     // 5. 启动后台 auto_import 线程：每 5 分钟执行一次标题导入
@@ -533,7 +534,7 @@ fn main() {
                         if wf_id.is_empty() {
                             routes::json_response(400, &serde_json::json!({"error": "missing workflow id"}))
                         } else {
-                            workflows::handle_post_workflow_run(&ctx, wf_id, &workflow_runner, &job_runner)
+                            workflows::handle_post_workflow_run(wf_id, &workflow_runner)
                         }
                     }
                 }

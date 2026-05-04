@@ -79,9 +79,11 @@ fn request_device(request: &tiny_http::Request) -> (String, Option<String>, Opti
 }
 
 /// 正在运行的 job：持有子进程句柄，用于空闲超时 kill 和取消操作。
+/// completion_tx 在 exec_job 清理阶段发送，通知 WorkflowRunner 可以提交下一步。
 struct RunningJob {
     job_id: String,
     child: std::process::Child,
+    completion_tx: Option<std::sync::mpsc::SyncSender<()>>,
 }
 
 /// job 提交错误类型。
@@ -507,9 +509,143 @@ impl JobRunner {
                 &running,
                 &broadcaster,
                 &runner_id,
+                None, // normal jobs don't use completion channel
             )
         });
 
+        Ok(job_id)
+    }
+
+    /// 提交 workflow step job 并等待完成。
+    ///
+    /// 与 submit() 的区别：
+    /// - 跳过并发检查：先等前一个 job 完成（via completion channel），再提交
+    /// - 跳过 runtime drift / resume cost guard：workflow 是程序编排
+    /// - 跳过 audit 事件：workflow step 不需要设备归因
+    /// - 同步等待：阻塞直到 exec_job 完成
+    pub fn submit_workflow_step(
+        &self,
+        step_kind: &str,
+        provider: &str,
+        project_path: Option<&str>,
+        prompt: &str,
+        conversation_id: Option<&str>,
+    ) -> Result<String, String> {
+        // 1. 等前一个 job 完成（如果有）
+        {
+            let guard = self.running.lock().unwrap();
+            if guard.is_some() {
+                drop(guard);
+                // 轮询 running 直到为空（前一个 exec_job 清理完成）
+                loop {
+                    let guard = self.running.lock().unwrap();
+                    if guard.is_none() {
+                        break;
+                    }
+                    drop(guard);
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+
+        // 2. 确保 DB 中没有 active jobs
+        let store = AuditStore::open(&self.db_path)
+            .map_err(|e| format!("open db: {e}"))?;
+        let active = store.count_active_jobs()
+            .map_err(|e| format!("count active: {e}"))?;
+        if active > 0 {
+            // 等待 active job 完成
+            loop {
+                let store = AuditStore::open(&self.db_path)
+                    .map_err(|e| format!("open db: {e}"))?;
+                let count = store.count_active_jobs()
+                    .map_err(|e| format!("count active: {e}"))?;
+                if count == 0 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        }
+
+        // 3. 构造 input JSON（build_command 需要的格式）
+        let command_input = serde_json::json!({
+            "provider": provider,
+            "prompt": prompt,
+            "conversation_id": conversation_id,
+            "runtime_permission_mode": "unknown",
+        });
+
+        // 4. 构建命令
+        let cmd = build_command(
+            step_kind,
+            &command_input,
+            project_path,
+            &self.resolver,
+            &self.registry,
+        ).map_err(|e| format!("build command: {e}"))?;
+
+        // 5. 插入 job 到 DB
+        let store = AuditStore::open(&self.db_path)
+            .map_err(|e| format!("open db: {e}"))?;
+        let job_id = uuid::Uuid::now_v7().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        store.insert_job(
+            &job_id,
+            step_kind,
+            &command_input.to_string(),
+            &now,
+            Some(provider),
+            project_path,
+            conversation_id,
+            Some(prompt),
+        ).map_err(|e| format!("insert job: {e}"))?;
+
+        // 6. 创建 completion channel
+        let (completion_tx, completion_rx) = std::sync::mpsc::sync_channel::<()>(1);
+
+        // 7. Broadcast queued
+        self.broadcaster.lock().unwrap().broadcast(sse::SseEvent {
+            event_type: "job_status".to_string(),
+            data: serde_json::json!({
+                "job_id": job_id,
+                "status": "queued",
+                "failure_reason": null,
+            }).to_string(),
+        });
+
+        // 8. Spawn exec_job
+        let db_path = self.db_path.clone();
+        let timeout_secs = if step_kind == "agent_prompt" {
+            self.agent_prompt_timeout_secs
+        } else {
+            self.timeout_secs
+        };
+        let max_output_bytes = self.max_output_bytes;
+        let running = self.running.clone();
+        let job_id_clone = job_id.clone();
+        let broadcaster = self.broadcaster.clone();
+        let runner_id = self.runner_id.clone();
+
+        std::thread::spawn(move || {
+            exec_job(
+                &job_id_clone,
+                &db_path,
+                cmd,
+                timeout_secs,
+                max_output_bytes,
+                &running,
+                &broadcaster,
+                &runner_id,
+                Some(completion_tx),
+            )
+        });
+
+        // 9. 等待 exec_job 完成
+        completion_rx.recv()
+            .map_err(|_| "completion channel closed".to_string())?;
+
+        // 10. 返回 job_id
         Ok(job_id)
     }
 
@@ -932,6 +1068,7 @@ fn exec_job(
     running: &Arc<Mutex<Option<RunningJob>>>,
     broadcaster: &SharedBroadcaster,
     runner_id: &str,
+    completion_tx: Option<std::sync::mpsc::SyncSender<()>>,
 ) {
     let store = match AuditStore::open(db_path) {
         Ok(s) => s,
@@ -1048,6 +1185,7 @@ fn exec_job(
         *guard = Some(RunningJob {
             job_id: job_id.to_string(),
             child,
+            completion_tx,
         });
     }
 
@@ -1238,6 +1376,16 @@ fn exec_job(
     if stop_requested {
         let mut lw = log_writer.lock().unwrap();
         lw.write_system_no_activity("[stop hook received — converging job]");
+    }
+
+    // Send completion signal (for workflow step synchronization) before clearing running
+    {
+        let guard = running.lock().unwrap();
+        if let Some(ref job) = *guard {
+            if let Some(ref tx) = job.completion_tx {
+                let _ = tx.send(());
+            }
+        }
     }
 
     // Clear running state

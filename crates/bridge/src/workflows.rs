@@ -15,7 +15,6 @@ use checkpoint_core::store::workflows::WorkflowStepRow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use crate::jobs::JobRunner;
 use crate::routes::{json_response, read_json_body};
@@ -33,14 +32,16 @@ pub struct WorkflowRunner {
     running: Arc<Mutex<Option<RunningWorkflow>>>,
     db_path: PathBuf,
     broadcaster: SharedBroadcaster,
+    job_runner: Arc<JobRunner>,
 }
 
 impl WorkflowRunner {
-    pub fn new(db_path: PathBuf, broadcaster: SharedBroadcaster) -> Self {
+    pub fn new(db_path: PathBuf, broadcaster: SharedBroadcaster, job_runner: Arc<JobRunner>) -> Self {
         Self {
             running: Arc::new(Mutex::new(None)),
             db_path,
             broadcaster,
+            job_runner,
         }
     }
 
@@ -48,7 +49,6 @@ impl WorkflowRunner {
     pub fn start_workflow(
         &self,
         workflow_id: &str,
-        job_runner: &Arc<JobRunner>,
     ) -> Result<(), String> {
         {
             let guard = self.running.lock().unwrap();
@@ -105,7 +105,7 @@ impl WorkflowRunner {
         let db_path = self.db_path.clone();
         let running_ref = self.running.clone();
         let broadcaster = self.broadcaster.clone();
-        let job_runner = job_runner.clone();
+        let job_runner = self.job_runner.clone();
 
         std::thread::spawn(move || {
             execute_workflow(
@@ -220,7 +220,6 @@ enum ExecuteError {
     Cancelled,
     Db(String),
     JobFailed(String),
-    Timeout,
 }
 
 impl std::fmt::Display for ExecuteError {
@@ -229,7 +228,6 @@ impl std::fmt::Display for ExecuteError {
             ExecuteError::Cancelled => write!(f, "cancelled"),
             ExecuteError::Db(msg) => write!(f, "db error: {msg}"),
             ExecuteError::JobFailed(msg) => write!(f, "job failed: {msg}"),
-            ExecuteError::Timeout => write!(f, "workflow step timeout"),
         }
     }
 }
@@ -257,7 +255,6 @@ fn execute_workflow_inner(
 
         // 跳过已完成的步骤（重试场景）
         if step.status == "succeeded" {
-            // 读取该步骤的日志作为下一步的上下文
             if let Some(ref job_id) = step.job_id {
                 previous_logs = Some(read_job_logs_for_context(
                     &store, job_id, &step.context_strategy,
@@ -283,47 +280,24 @@ fn execute_workflow_inner(
             }).to_string(),
         });
 
-        // 提交 job
-        let job_id = uuid::Uuid::now_v7().to_string();
-        let input = serde_json::json!({});
-        let provider = step.provider.as_deref();
+        // 通过 JobRunner 提交并同步等待完成
+        let provider = step.provider.as_deref().unwrap_or("claude_code");
         let project_path = step.project_path.as_deref();
 
-        store.insert_job(
-            &job_id,
+        let job_result = job_runner.submit_workflow_step(
             &step.kind,
-            &input.to_string(),
-            &chrono::Utc::now().to_rfc3339(),
             provider,
             project_path,
-            None,
-            Some(&prompt),
-        ).map_err(|e| ExecuteError::Db(e.to_string()))?;
-
-        // 绑定 job_id 到步骤
-        let _ = store.update_workflow_step_job(&step.id, &job_id);
-
-        // 广播步骤 job 提交
-        broadcaster.lock().unwrap().broadcast(crate::sse::SseEvent {
-            event_type: "workflow_step_job".to_string(),
-            data: serde_json::json!({
-                "workflow_id": workflow_id,
-                "step_id": step.id,
-                "job_id": job_id,
-            }).to_string(),
-        });
-
-        // 同步执行 job（阻塞直到完成）
-        let job_result = execute_step_job_sync(
-            &job_id,
-            db_path,
-            job_runner,
-            cancel_flag,
-            broadcaster,
+            &prompt,
+            None, // conversation_id: workflow steps 每步独立
         );
 
         match job_result {
-            Ok(()) => {
+            Ok(job_id) => {
+                // 绑定 job_id 到步骤
+                let store = AuditStore::open(db_path).map_err(|e| ExecuteError::Db(e.to_string()))?;
+                let _ = store.update_workflow_step_job(&step.id, &job_id);
+
                 let now = chrono::Utc::now().to_rfc3339();
                 store.update_workflow_step_status(&step.id, "succeeded", Some(&now))
                     .map_err(|e| ExecuteError::Db(e.to_string()))?;
@@ -332,76 +306,27 @@ fn execute_workflow_inner(
                 previous_logs = Some(read_job_logs_for_context(
                     &store, &job_id, &step.context_strategy,
                 ));
-            }
-            Err(ExecuteError::Cancelled) => {
-                let _ = store.update_workflow_step_status(&step.id, "cancelled", None);
-                // 取消正在运行的 job
-                let _ = job_runner.cancel(&job_id);
-                return Err(ExecuteError::Cancelled);
+
+                broadcaster.lock().unwrap().broadcast(crate::sse::SseEvent {
+                    event_type: "workflow_step_status".to_string(),
+                    data: serde_json::json!({
+                        "workflow_id": workflow_id,
+                        "step_id": step.id,
+                        "step_order": step.step_order,
+                        "status": "succeeded"
+                    }).to_string(),
+                });
             }
             Err(e) => {
                 let now = chrono::Utc::now().to_rfc3339();
+                let store = AuditStore::open(db_path).map_err(|e| ExecuteError::Db(e.to_string()))?;
                 let _ = store.update_workflow_step_status(&step.id, "failed", Some(&now));
-                return Err(e);
+                return Err(ExecuteError::JobFailed(e));
             }
         }
-
-        // 广播步骤完成
-        broadcaster.lock().unwrap().broadcast(crate::sse::SseEvent {
-            event_type: "workflow_step_status".to_string(),
-            data: serde_json::json!({
-                "workflow_id": workflow_id,
-                "step_id": step.id,
-                "step_order": step.step_order,
-                "status": "succeeded"
-            }).to_string(),
-        });
     }
 
     Ok(())
-}
-
-/// 同步执行单个 step job：轮询 job 状态直到 terminal。
-fn execute_step_job_sync(
-    job_id: &str,
-    db_path: &PathBuf,
-    _job_runner: &Arc<JobRunner>,
-    cancel_flag: &Arc<AtomicBool>,
-    _broadcaster: &SharedBroadcaster,
-) -> Result<(), ExecuteError> {
-    // 轮询 job 状态直到 terminal（succeeded/failed/cancelled）
-    // 由于 JobRunner 只支持白名单 kind 且单 job 并发，
-    // workflow step job 直接写 DB 后等待外部 JobRunner pickup 或超时。
-    let start = std::time::Instant::now();
-    let timeout = Duration::from_secs(600); // 10 分钟 per step
-
-    loop {
-        if cancel_flag.load(Ordering::SeqCst) {
-            return Err(ExecuteError::Cancelled);
-        }
-
-        if start.elapsed() > timeout {
-            return Err(ExecuteError::Timeout);
-        }
-
-        // 每次轮询打开独立连接，避免长期持锁
-        let store = AuditStore::open(db_path).map_err(|e| ExecuteError::Db(e.to_string()))?;
-        if let Ok(Some(job)) = store.get_job(job_id) {
-            match job.status.as_str() {
-                "succeeded" => return Ok(()),
-                "failed" => {
-                    let reason = job.failure_reason.unwrap_or_default();
-                    return Err(ExecuteError::JobFailed(reason));
-                }
-                "cancelled" => return Err(ExecuteError::Cancelled),
-                _ => {
-                    // queued, running, observing — 继续等待
-                }
-            }
-        }
-
-        std::thread::sleep(Duration::from_secs(2));
-    }
 }
 
 /// 读取 job 日志并按 context_strategy 截断。
@@ -611,12 +536,10 @@ pub fn handle_get_workflow(
 
 /// POST /workflows/:id/run — 触发工作流执行。
 pub fn handle_post_workflow_run(
-    _ctx: &crate::context::AppContext,
     workflow_id: &str,
     workflow_runner: &Arc<WorkflowRunner>,
-    job_runner: &Arc<JobRunner>,
 ) -> tiny_http::ResponseBox {
-    match workflow_runner.start_workflow(workflow_id, job_runner) {
+    match workflow_runner.start_workflow(workflow_id) {
         Ok(()) => json_response(200, &serde_json::json!({"status": "running"})),
         Err(e) => {
             if e.contains("already running") {
