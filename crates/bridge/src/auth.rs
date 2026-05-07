@@ -11,8 +11,8 @@
 //! - Bearer token 校验使用恒定时间比较，防止时序攻击
 //! - 密码文件 0600 权限，启动日志只打印路径不打印密码
 
-use checkpoint_core::audit::AuditStore;
-use checkpoint_core::paths;
+use agent_aspect_core::audit::AuditStore;
+use agent_aspect_core::paths;
 use std::io::Write;
 
 /// 加载或生成 bridge Bearer token。
@@ -212,12 +212,9 @@ pub fn ensure_relay_tokens(relay_url: &str) -> Result<RelayTokens, String> {
 }
 
 /// 从环境变量或文件加载 relay 一次性注册令牌。
-/// 环境变量 AGENT_ASPECT_RELAY_SETUP_TOKEN / CHECKPOINT_RELAY_SETUP_TOKEN 优先于文件。
+/// 环境变量 AGENT_ASPECT_RELAY_SETUP_TOKEN 优先于文件。
 fn load_setup_token() -> Option<String> {
-    if let Some(t) = checkpoint_core::env_compat::env_var(
-        "AGENT_ASPECT_RELAY_SETUP_TOKEN",
-        "CHECKPOINT_RELAY_SETUP_TOKEN",
-    ) {
+    if let Some(t) = agent_aspect_core::env_compat::env_var("AGENT_ASPECT_RELAY_SETUP_TOKEN") {
         return Some(t);
     }
     let path = paths::relay_setup_token_path();
@@ -323,7 +320,7 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 /// 2. `~/.agent-aspect/bridge.password` 文件
 /// 3. 生成随机密码并写入 `bridge.password`（0600 权限）
 pub fn bootstrap_owner_user(store: &AuditStore) {
-    if let Err(e) = checkpoint_core::user_password::bootstrap_owner_user(store) {
+    if let Err(e) = agent_aspect_core::user_password::bootstrap_owner_user(store) {
         eprintln!("agent-aspect-bridge: bootstrap failed: {e}");
     }
 }
@@ -331,17 +328,17 @@ pub fn bootstrap_owner_user(store: &AuditStore) {
 /// 重置 admin 密码：生成新随机密码，更新 SQLite 和 bridge.password 文件。
 /// 返回明文新密码（CLI 可以打印到 stdout）。
 pub fn reset_admin_password(store: &AuditStore) -> Result<String, String> {
-    checkpoint_core::user_password::reset_admin_password(store)
+    agent_aspect_core::user_password::reset_admin_password(store)
 }
 
 /// 设置 admin 密码：用传入的新密码更新 SQLite 和 bridge.password 文件。
 pub fn set_admin_password(store: &AuditStore, new_password: &str) -> Result<(), String> {
-    checkpoint_core::user_password::set_admin_password(store, new_password)
+    agent_aspect_core::user_password::set_admin_password(store, new_password)
 }
 
 /// 仅当 sys_user 为空时初始化 admin 用户；已有用户则拒绝。
 pub fn init_admin_user(store: &AuditStore) -> Result<(), String> {
-    checkpoint_core::user_password::init_admin_user(store)
+    agent_aspect_core::user_password::init_admin_user(store)
 }
 
 #[cfg(test)]
@@ -379,7 +376,7 @@ mod tests {
 
     #[test]
     fn ensure_uses_existing_tokens() {
-        let dir = std::env::temp_dir().join("checkpoint-test-ensure-tokens");
+        let dir = std::env::temp_dir().join("agent-aspect-test-ensure-tokens");
         let _ = std::fs::create_dir_all(&dir);
 
         let mac_path = dir.join("relay.mac_token");
@@ -407,7 +404,7 @@ mod tests {
 
     #[test]
     fn corrupt_pair_detected_and_cleaned() {
-        let dir = std::env::temp_dir().join("checkpoint-test-corrupt-pair");
+        let dir = std::env::temp_dir().join("agent-aspect-test-corrupt-pair");
         let _ = std::fs::create_dir_all(&dir);
 
         let mac_path = dir.join("relay.mac_token");
@@ -436,7 +433,7 @@ mod tests {
 
     #[test]
     fn delete_relay_token_files_removes_both() {
-        let dir = std::env::temp_dir().join("checkpoint-test-delete-tokens");
+        let dir = std::env::temp_dir().join("agent-aspect-test-delete-tokens");
         let _ = std::fs::create_dir_all(&dir);
 
         let mac_path = dir.join("relay.mac_token");
@@ -459,7 +456,7 @@ mod tests {
 
     #[test]
     fn save_token_file_allows_overwrite() {
-        let dir = std::env::temp_dir().join("checkpoint-test-save-overwrite");
+        let dir = std::env::temp_dir().join("agent-aspect-test-save-overwrite");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("relay.mac_token");
 

@@ -121,7 +121,7 @@ fn process_name(pid: u32) -> Option<String> {
 /// 判断实际进程名是否匹配期望名。
 ///
 /// 改名迁移完成后，运行期只接受精确进程名匹配。
-/// 旧 `checkpoint*` 服务必须通过 launchd label 显式清理，不能在新服务的
+/// 旧 `agent-aspect*` 服务必须通过 launchd label 显式清理，不能在新服务的
 /// PID 守护路径中被当作同一身份，否则会误杀正在服务 hook 的新进程。
 fn process_name_matches(actual: &str, expected: &str) -> bool {
     actual == expected
@@ -147,38 +147,38 @@ mod tests {
     use super::process_name_matches;
 
     #[test]
-    fn process_name_matches_current_and_legacy_bridge_names() {
+    fn process_name_matches_current_bridge_name_only() {
         assert!(process_name_matches(
             "agent-aspect-bridge",
             "agent-aspect-bridge"
         ));
         assert!(!process_name_matches(
-            "checkpoint-bridge",
+            "agent-aspect-bridge-dev",
             "agent-aspect-bridge"
         ));
-        assert!(!process_name_matches(
-            "agent-aspect-bridge",
-            "checkpoint-bridge"
-        ));
+        assert!(!process_name_matches("agent-aspect", "agent-aspect-bridge"));
     }
 
     #[test]
-    fn process_name_matches_current_and_legacy_daemon_names() {
+    fn process_name_matches_current_daemon_name_only() {
         assert!(process_name_matches("agent-aspectd", "agent-aspectd"));
-        assert!(!process_name_matches("checkpointd", "agent-aspectd"));
-        assert!(!process_name_matches("agent-aspectd", "checkpointd"));
+        assert!(!process_name_matches("agent-aspect", "agent-aspectd"));
+        assert!(!process_name_matches(
+            "agent-aspectd-helper",
+            "agent-aspectd"
+        ));
     }
 
     #[test]
     fn process_name_matches_rejects_unrelated_names() {
         assert!(!process_name_matches("bash", "agent-aspect-bridge"));
         assert!(!process_name_matches(
-            "checkpoint-relay",
+            "agent-aspect-relay",
             "agent-aspect-bridge"
         ));
         assert!(!process_name_matches(
-            "checkpoint-bridge-helper",
-            "checkpoint-bridge"
+            "agent-aspect-bridge-helper",
+            "agent-aspect-bridge"
         ));
     }
 }

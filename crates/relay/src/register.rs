@@ -336,7 +336,6 @@ mod tests {
             registered_tokens_path: test_tokens_path(),
             register_limiter: Arc::new(Mutex::new(IpRateLimiter::new())),
             client_limiter: Arc::new(Mutex::new(ClientRateLimiter::new())),
-            jti_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -346,7 +345,7 @@ mod tests {
 
     fn test_tokens_path() -> PathBuf {
         std::env::temp_dir().join(format!(
-            "checkpoint-relay-registered-tokens-test-{}-{}.json",
+            "agent-aspect-relay-registered-tokens-test-{}-{}.json",
             std::process::id(),
             uuid::Uuid::now_v7()
         ))

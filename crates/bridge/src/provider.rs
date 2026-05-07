@@ -9,7 +9,7 @@
 //!   不允许根据 provider 静默丢弃 conversation_id。
 //! - 命令参数通过 argv 传递，不做 shell 拼接。
 
-use checkpoint_core::provider_registry::ProviderRegistry;
+use agent_aspect_core::provider_registry::ProviderRegistry;
 use std::process::Command;
 
 /// 校验 provider 名称是否在 registry 中已知且启用。
@@ -35,7 +35,7 @@ pub fn build_agent_command(
 
     // 通用权限透传：从 provider 配置中读取 CLI 参数和环境变量。
     let permission_injection =
-        if runtime_permission_mode == Some(checkpoint_core::constants::PERMISSION_MODE_BYPASS) {
+        if runtime_permission_mode == Some(agent_aspect_core::constants::PERMISSION_MODE_BYPASS) {
             registry
                 .get(provider)
                 .filter(|c| c.supports_permission_passthrough)
@@ -96,7 +96,7 @@ pub fn build_agent_command(
 /// 调用点必须放在最终 prompt 参数之前，避免 provider 将 prompt 之后的内容当作正文。
 fn apply_permission_injection(
     cmd: &mut Command,
-    cfg: Option<&checkpoint_core::provider_registry::ProviderConfig>,
+    cfg: Option<&agent_aspect_core::provider_registry::ProviderConfig>,
 ) {
     if let Some(cfg) = cfg {
         if let Some(ref arg) = cfg.permission_mode_cli_arg {
@@ -111,7 +111,7 @@ fn apply_permission_injection(
 /// 组合方法：先通过 resolver 解析二进制路径，再构建 Command。
 /// resolver 从 config.toml 和 PATH 查找实际的可执行文件路径。
 pub fn resolve_and_build(
-    resolver: &checkpoint_core::provider_resolver::ProviderResolver,
+    resolver: &agent_aspect_core::provider_resolver::ProviderResolver,
     registry: &ProviderRegistry,
     provider: &str,
     project_path: &str,
@@ -134,11 +134,11 @@ pub fn resolve_and_build(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use checkpoint_core::provider_registry::ProviderConfigOverride;
+    use agent_aspect_core::provider_registry::ProviderConfigOverride;
     use std::collections::HashMap;
 
     fn make_registry() -> ProviderRegistry {
-        ProviderRegistry::from_config(&checkpoint_core::config::Config::default_config())
+        ProviderRegistry::from_config(&agent_aspect_core::config::Config::default_config())
     }
 
     fn make_registry_with_permission_passthrough(
@@ -147,7 +147,7 @@ mod tests {
         env_key: &str,
         env_value: &str,
     ) -> ProviderRegistry {
-        let mut config = checkpoint_core::config::Config::default_config();
+        let mut config = agent_aspect_core::config::Config::default_config();
         let mut providers = HashMap::new();
         providers.insert(
             provider.to_string(),
@@ -337,7 +337,7 @@ mod tests {
             "/tmp/proj",
             Some("sess-123"),
             "continue",
-            Some(checkpoint_core::constants::PERMISSION_MODE_BYPASS),
+            Some(agent_aspect_core::constants::PERMISSION_MODE_BYPASS),
             &registry,
         )
         .unwrap();
@@ -357,7 +357,7 @@ mod tests {
             "/tmp/proj",
             Some("sess-123"),
             "continue",
-            Some(checkpoint_core::constants::PERMISSION_MODE_BYPASS),
+            Some(agent_aspect_core::constants::PERMISSION_MODE_BYPASS),
             &registry,
         )
         .unwrap();
@@ -400,7 +400,7 @@ mod tests {
             "/tmp/proj",
             Some("tid"),
             "fix",
-            Some(checkpoint_core::constants::PERMISSION_MODE_BYPASS),
+            Some(agent_aspect_core::constants::PERMISSION_MODE_BYPASS),
             &registry,
         )
         .unwrap();
@@ -428,7 +428,7 @@ mod tests {
             "/tmp/proj",
             Some("sid"),
             "fix",
-            Some(checkpoint_core::constants::PERMISSION_MODE_BYPASS),
+            Some(agent_aspect_core::constants::PERMISSION_MODE_BYPASS),
             &registry,
         )
         .unwrap();
@@ -455,7 +455,7 @@ mod tests {
             "/tmp/proj",
             None,
             "fix",
-            Some(checkpoint_core::constants::PERMISSION_MODE_BYPASS),
+            Some(agent_aspect_core::constants::PERMISSION_MODE_BYPASS),
             &registry,
         )
         .unwrap();
@@ -465,7 +465,7 @@ mod tests {
             "/tmp/proj",
             None,
             "fix",
-            Some(checkpoint_core::constants::PERMISSION_MODE_BYPASS),
+            Some(agent_aspect_core::constants::PERMISSION_MODE_BYPASS),
             &registry,
         )
         .unwrap();

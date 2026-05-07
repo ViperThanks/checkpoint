@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn overwrite_password_file_roundtrip() {
-        let dir = unique_temp_dir("checkpoint-test-pwd-file");
+        let dir = unique_temp_dir("agent-aspect-test-pwd-file");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("test.password");
 
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn reset_admin_password_changes_db_and_file() {
         let _guard = HOME_MUTEX.lock().unwrap();
-        let tmp_home = unique_temp_dir("checkpoint-test-reset");
+        let tmp_home = unique_temp_dir("agent-aspect-test-reset");
         let _ = std::fs::create_dir_all(&tmp_home);
         let old_home = unsafe {
             let old = std::env::var("HOME").unwrap_or_default();
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn set_admin_password_updates_db_and_file() {
         let _guard = HOME_MUTEX.lock().unwrap();
-        let tmp_home = unique_temp_dir("checkpoint-test-set");
+        let tmp_home = unique_temp_dir("agent-aspect-test-set");
         let _ = std::fs::create_dir_all(&tmp_home);
         let old_home = unsafe {
             let old = std::env::var("HOME").unwrap_or_default();
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn bootstrap_creates_admin_in_empty_db() {
         let _guard = HOME_MUTEX.lock().unwrap();
-        let tmp_home = unique_temp_dir("checkpoint-test-bootstrap");
+        let tmp_home = unique_temp_dir("agent-aspect-test-bootstrap");
         let _ = std::fs::create_dir_all(&tmp_home);
         let old_home = unsafe {
             let old = std::env::var("HOME").unwrap_or_default();
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn bootstrap_idempotent() {
         let _guard = HOME_MUTEX.lock().unwrap();
-        let tmp_home = unique_temp_dir("checkpoint-test-idempotent");
+        let tmp_home = unique_temp_dir("agent-aspect-test-idempotent");
         let _ = std::fs::create_dir_all(&tmp_home);
         let old_home = unsafe {
             let old = std::env::var("HOME").unwrap_or_default();

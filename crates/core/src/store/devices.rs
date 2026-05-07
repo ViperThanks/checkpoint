@@ -1,7 +1,7 @@
 //! 设备 DAO — relay 设备的注册、查询、标签管理。
 
 use crate::audit::AuditStore;
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 
 /// 设备行 — 对应 devices 表。
 #[derive(Debug, Clone)]
@@ -23,7 +23,7 @@ impl AuditStore {
         user_agent: Option<&str>,
         remote_addr: Option<&str>,
         timestamp: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "INSERT INTO devices (device_id, label, user_agent, remote_addr, first_seen, last_seen)
@@ -34,11 +34,11 @@ impl AuditStore {
                     last_seen = excluded.last_seen",
                 rusqlite::params![device_id, user_agent, remote_addr, timestamp],
             )
-            .map_err(CheckpointError::UpsertDevice)?;
+            .map_err(AgentAspectError::UpsertDevice)?;
         Ok(())
     }
 
-    pub fn list_devices(&self) -> CheckpointResult<Vec<DeviceRow>> {
+    pub fn list_devices(&self) -> AgentAspectResult<Vec<DeviceRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -46,7 +46,7 @@ impl AuditStore {
                  FROM devices
                  ORDER BY last_seen DESC",
             )
-            .map_err(CheckpointError::QueryDevice)?;
+            .map_err(AgentAspectError::QueryDevice)?;
         let rows = stmt
             .query_map([], |row| {
                 Ok(DeviceRow {
@@ -58,20 +58,20 @@ impl AuditStore {
                     last_seen: row.get(5)?,
                 })
             })
-            .map_err(CheckpointError::QueryDevice)?;
+            .map_err(AgentAspectError::QueryDevice)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryDevice)
+            .map_err(AgentAspectError::QueryDevice)
     }
 
     /// 更新设备显示标签。返回是否实际更新了行。
-    pub fn update_device_label(&self, device_id: &str, label: &str) -> CheckpointResult<bool> {
+    pub fn update_device_label(&self, device_id: &str, label: &str) -> AgentAspectResult<bool> {
         let rows = self
             .conn
             .execute(
                 "UPDATE devices SET label = ?2 WHERE device_id = ?1",
                 rusqlite::params![device_id, label],
             )
-            .map_err(CheckpointError::UpdateDevice)?;
+            .map_err(AgentAspectError::UpdateDevice)?;
         Ok(rows > 0)
     }
 }

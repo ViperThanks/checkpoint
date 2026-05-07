@@ -1,7 +1,7 @@
 //! 决策 DAO — 决策记录的插入、查询、过滤、pending asks。
 
 use crate::audit::AuditStore;
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 
 /// 决策行 — 关联 event、device 信息后的扁平视图。
 #[derive(Debug)]
@@ -94,7 +94,7 @@ impl AuditStore {
         rule_id: Option<&str>,
         note: &str,
         timestamp: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.insert_decision_for_device(event_id, action, rule_id, note, timestamp, None)
     }
 
@@ -108,14 +108,14 @@ impl AuditStore {
         note: &str,
         timestamp: &str,
         device_id: Option<&str>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "INSERT INTO decisions (event_id, action, rule_id, note, timestamp, device_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 rusqlite::params![event_id, action, rule_id, note, timestamp, device_id],
             )
-            .map_err(CheckpointError::InsertDecision)?;
+            .map_err(AgentAspectError::InsertDecision)?;
 
         // Update conversation counts if this event belongs to a conversation
         if action == "ask" || action == "deny" {
@@ -134,7 +134,7 @@ impl AuditStore {
                 let deny_delta = if action == "deny" { 1 } else { 0 };
                 if let Err(e) = self.update_conversation_counts(&db_id, 0, ask_delta, deny_delta, 0)
                 {
-                    eprintln!("checkpoint-audit: update conversation counts for {db_id}: {e}");
+                    eprintln!("agent-aspect-audit: update conversation counts for {db_id}: {e}");
                 }
             }
         }
@@ -142,25 +142,25 @@ impl AuditStore {
         Ok(())
     }
 
-    pub fn decision_count(&self) -> CheckpointResult<usize> {
+    pub fn decision_count(&self) -> AgentAspectResult<usize> {
         self.conn
             .query_row("SELECT COUNT(*) FROM decisions", [], |row| {
                 row.get::<_, usize>(0)
             })
-            .map_err(CheckpointError::CountDecisions)
+            .map_err(AgentAspectError::CountDecisions)
     }
 
-    pub fn decision_count_since(&self, since: &str) -> CheckpointResult<usize> {
+    pub fn decision_count_since(&self, since: &str) -> AgentAspectResult<usize> {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM decisions WHERE timestamp > ?1",
                 rusqlite::params![since],
                 |row| row.get::<_, usize>(0),
             )
-            .map_err(CheckpointError::CountDecisions)
+            .map_err(AgentAspectError::CountDecisions)
     }
 
-    pub fn recent_decisions(&self, limit: usize) -> CheckpointResult<Vec<DecisionRow>> {
+    pub fn recent_decisions(&self, limit: usize) -> AgentAspectResult<Vec<DecisionRow>> {
         let sql = format!(
             "SELECT {} FROM decisions d
              LEFT JOIN events e ON d.event_id = e.id
@@ -172,14 +172,14 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::PrepareRecentDecisions)?;
+            .map_err(AgentAspectError::PrepareRecentDecisions)?;
 
         let rows = stmt
             .query_map(rusqlite::params![limit], Self::map_decision_row)
-            .map_err(CheckpointError::QueryRecentDecisions)?;
+            .map_err(AgentAspectError::QueryRecentDecisions)?;
 
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::CollectDecisions)
+            .map_err(AgentAspectError::CollectDecisions)
     }
 
     /// 带多维度过滤的决策查询：action / tool / since / agent / verdict / latest_only。
@@ -193,7 +193,7 @@ impl AuditStore {
         agent_filter: Option<&str>,
         verdict_filter: Option<&str>,
         latest_only: bool,
-    ) -> CheckpointResult<Vec<DecisionRow>> {
+    ) -> AgentAspectResult<Vec<DecisionRow>> {
         let mut filter = FilterClauses::new();
         filter.apply(action_filter, tool_filter, since, agent_filter);
         if latest_only {
@@ -236,14 +236,14 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
 
         let rows = stmt
             .query_map(param_refs.as_slice(), Self::map_decision_row)
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
 
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::CollectDecisions)
+            .map_err(AgentAspectError::CollectDecisions)
     }
 
     pub fn count_decisions_filtered(
@@ -254,7 +254,7 @@ impl AuditStore {
         agent_filter: Option<&str>,
         verdict_filter: Option<&str>,
         latest_only: bool,
-    ) -> CheckpointResult<usize> {
+    ) -> AgentAspectResult<usize> {
         let mut filter = FilterClauses::new();
         filter.apply(action_filter, tool_filter, since, agent_filter);
         if latest_only {
@@ -289,13 +289,13 @@ impl AuditStore {
 
         self.conn
             .query_row(&sql, param_refs.as_slice(), |row| row.get::<_, usize>(0))
-            .map_err(CheckpointError::CountFilteredDecisions)
+            .map_err(AgentAspectError::CountFilteredDecisions)
     }
 
     pub fn get_decisions_for_events(
         &self,
         event_ids: &[String],
-    ) -> CheckpointResult<Vec<DecisionRow>> {
+    ) -> AgentAspectResult<Vec<DecisionRow>> {
         if event_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -322,16 +322,16 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
         let rows = stmt
             .query_map(param_refs.as_slice(), Self::map_decision_row)
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::CollectDecisions)
+            .map_err(AgentAspectError::CollectDecisions)
     }
 
     /// Returns events where the latest decision is "ask" (pending user action).
-    pub fn pending_asks(&self, limit: usize) -> CheckpointResult<Vec<DecisionRow>> {
+    pub fn pending_asks(&self, limit: usize) -> AgentAspectResult<Vec<DecisionRow>> {
         let sql = format!(
             "SELECT {} FROM decisions d
              LEFT JOIN events e ON d.event_id = e.id
@@ -347,21 +347,21 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
 
         let rows = stmt
             .query_map(rusqlite::params![limit], Self::map_decision_row)
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
 
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::CollectDecisions)
+            .map_err(AgentAspectError::CollectDecisions)
     }
 
     /// Returns the latest decision + feedback for a single event_id.
     pub fn get_decision_with_feedback(
         &self,
         event_id: &str,
-    ) -> CheckpointResult<Option<(DecisionRow, Option<crate::store::feedback::FeedbackRow>)>> {
+    ) -> AgentAspectResult<Option<(DecisionRow, Option<crate::store::feedback::FeedbackRow>)>> {
         let decision = match self.latest_decision_for_event(event_id)? {
             Some(d) => d,
             None => return Ok(None),
@@ -374,7 +374,7 @@ impl AuditStore {
     pub fn latest_decision_for_event(
         &self,
         event_id: &str,
-    ) -> CheckpointResult<Option<DecisionRow>> {
+    ) -> AgentAspectResult<Option<DecisionRow>> {
         let sql = format!(
             "SELECT {} FROM decisions d
              LEFT JOIN events e ON d.event_id = e.id
@@ -385,10 +385,10 @@ impl AuditStore {
         );
         self.conn
             .query_row(&sql, rusqlite::params![event_id], Self::map_decision_row)
-            .map_err(CheckpointError::QueryFilteredDecisions)
+            .map_err(AgentAspectError::QueryFilteredDecisions)
             .map(Some)
             .or_else(|e| {
-                if let CheckpointError::QueryFilteredDecisions(
+                if let AgentAspectError::QueryFilteredDecisions(
                     rusqlite::Error::QueryReturnedNoRows,
                 ) = e
                 {

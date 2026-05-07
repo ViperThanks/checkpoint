@@ -1,7 +1,7 @@
 //! 反馈 DAO — 用户对事件裁决的反馈（useful/noisy/wrong/unsure）。
 
 use crate::audit::AuditStore;
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 use std::collections::HashMap;
 
 /// 反馈行 — 对应 event_feedback 表。每个 event_id 最多一条，INSERT OR REPLACE 语义。
@@ -20,21 +20,21 @@ impl AuditStore {
         verdict: &str,
         note: &str,
         created_at: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "INSERT OR REPLACE INTO event_feedback (event_id, verdict, note, created_at)
                  VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params![event_id, verdict, note, created_at],
             )
-            .map_err(CheckpointError::InsertFeedback)?;
+            .map_err(AgentAspectError::InsertFeedback)?;
         Ok(())
     }
 
     pub fn feedback_for_events(
         &self,
         event_ids: &[String],
-    ) -> CheckpointResult<HashMap<String, FeedbackRow>> {
+    ) -> AgentAspectResult<HashMap<String, FeedbackRow>> {
         if event_ids.is_empty() {
             return Ok(HashMap::new());
         }
@@ -57,7 +57,7 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::QueryFeedback)?;
+            .map_err(AgentAspectError::QueryFeedback)?;
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
                 Ok(FeedbackRow {
@@ -67,11 +67,11 @@ impl AuditStore {
                     created_at: row.get(3)?,
                 })
             })
-            .map_err(CheckpointError::QueryFeedback)?;
+            .map_err(AgentAspectError::QueryFeedback)?;
 
         let mut map = HashMap::new();
         for row in rows {
-            let fb = row.map_err(CheckpointError::QueryFeedback)?;
+            let fb = row.map_err(AgentAspectError::QueryFeedback)?;
             map.insert(fb.event_id.clone(), fb);
         }
         Ok(map)

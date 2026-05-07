@@ -4,9 +4,9 @@
 //! store 用 Arc<Mutex<>> 包裹是因为 SQLite 连接不是线程安全的，
 //! 同一时刻只有一个 handler 可以访问 DB。
 
-use checkpoint_core::audit::AuditStore;
-use checkpoint_core::provider_registry::ProviderRegistry;
-use checkpoint_core::provider_resolver::ProviderResolver;
+use agent_aspect_core::audit::AuditStore;
+use agent_aspect_core::provider_registry::ProviderRegistry;
+use agent_aspect_core::provider_resolver::ProviderResolver;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 

@@ -1,4 +1,4 @@
-//! `checkpoint doctor` — 安装健康检查，逐项验证所有依赖和运行状态。
+//! `agent-aspect doctor` — 安装健康检查，逐项验证所有依赖和运行状态。
 //!
 //! 检查项覆盖三大部分：
 //! - 二进制文件：agent-aspectd / agent-aspect-hook / agent-aspect-bridge 是否在 PATH 可达
@@ -7,9 +7,9 @@
 //!
 //! 输出格式：`[ OK ] label message`，任何 FAIL 项导致退出码 1。
 
-use checkpoint_core::audit::AuditStore;
-use checkpoint_core::config::Config;
-use checkpoint_core::paths;
+use agent_aspect_core::audit::AuditStore;
+use agent_aspect_core::config::Config;
+use agent_aspect_core::paths;
 
 use super::bridge::load_and_verify_state;
 use super::helpers::bin_dir;
@@ -374,7 +374,7 @@ fn check_claude_hooks() -> CheckResult {
         .map(|obj| {
             obj.values().any(|v| {
                 v.as_array().map_or(false, |arr| {
-                    arr.iter().any(|item| contains_checkpoint_hook(item))
+                    arr.iter().any(|item| contains_agent_aspect_hook(item))
                 })
             })
         })
@@ -395,13 +395,13 @@ fn check_claude_hooks() -> CheckResult {
     }
 }
 
-// 递归查找 item 中是否包含 agent-aspect-hook 或旧名 checkpoint-hook 引用
+// 递归查找 item 中是否包含 agent-aspect-hook 引用
 // 真实结构：item.hooks[].command（嵌套）
 // 扁平结构：item.command（兼容）
-fn contains_checkpoint_hook(item: &serde_json::Value) -> bool {
+fn contains_agent_aspect_hook(item: &serde_json::Value) -> bool {
     // 扁平：item.command
     if let Some(cmd) = item.get("command").and_then(|c| c.as_str()) {
-        if cmd.contains("agent-aspect-hook") || cmd.contains("checkpoint-hook") {
+        if cmd.contains("agent-aspect-hook") {
             return true;
         }
     }
@@ -409,7 +409,7 @@ fn contains_checkpoint_hook(item: &serde_json::Value) -> bool {
     if let Some(hooks) = item.get("hooks").and_then(|h| h.as_array()) {
         for h in hooks {
             if let Some(cmd) = h.get("command").and_then(|c| c.as_str()) {
-                if cmd.contains("agent-aspect-hook") || cmd.contains("checkpoint-hook") {
+                if cmd.contains("agent-aspect-hook") {
                     return true;
                 }
             }

@@ -9,10 +9,6 @@ use axum::http::{HeaderMap, StatusCode, request::Parts};
 use axum::response::{IntoResponse, Response};
 use std::borrow::Borrow;
 use std::sync::Arc;
-use std::time::Duration;
-
-/// jti 重放缓存有效期。
-const JTI_TTL: Duration = Duration::from_secs(300);
 
 /// 已认证的客户端信息。通过 axum extractor 自动验证。
 ///
@@ -69,22 +65,6 @@ where
                 r#"{"error":"sid_not_registered"}"#,
             )
                 .into_response());
-        }
-
-        // jti 重放检查
-        {
-            let mut cache = app.jti_cache.lock().await;
-            let now = std::time::Instant::now();
-            // 清理过期条目
-            cache.retain(|_, inserted| now.duration_since(*inserted) < JTI_TTL);
-            let jti = verified.payload.jti.clone();
-            if cache.contains_key(&jti) {
-                log_auth_failure(&method, &path, &device_id, 401, "token_replayed");
-                return Err(
-                    (StatusCode::UNAUTHORIZED, r#"{"error":"token_replayed"}"#).into_response()
-                );
-            }
-            cache.insert(jti, now);
         }
 
         // per-client 速率限制

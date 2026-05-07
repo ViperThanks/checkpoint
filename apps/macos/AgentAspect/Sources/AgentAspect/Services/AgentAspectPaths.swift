@@ -1,8 +1,6 @@
 /// AgentAspectPaths.swift — Centralized path resolution for Agent Aspect data
 ///
-/// Prefers `~/.agent-aspect/` (new canonical location). Falls back to
-/// `~/.checkpoint/` (legacy) when the new directory does not exist but the
-/// legacy one does. Every public method returns an absolute path string.
+/// Resolves files under the single canonical `~/.agent-aspect/` directory.
 
 import Foundation
 
@@ -10,18 +8,9 @@ enum AgentAspectPaths {
 
     // MARK: - Base directories
 
-    /// Primary data directory. Prefers `~/.agent-aspect`, falls back to
-    /// `~/.checkpoint` if only the legacy directory exists.
+    /// Primary data directory.
     static func dataDir() -> String {
-        let newDir = expandTilde("~/.agent-aspect")
-        if FileManager.default.fileExists(atPath: newDir) {
-            return newDir
-        }
-        let legacyDir = expandTilde("~/.checkpoint")
-        if FileManager.default.fileExists(atPath: legacyDir) {
-            return legacyDir
-        }
-        return newDir
+        expandTilde("~/.agent-aspect")
     }
 
     // MARK: - Bridge files

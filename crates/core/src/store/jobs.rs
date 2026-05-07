@@ -4,7 +4,7 @@
 //! 支持进程监控（pid / heartbeat）和 bridge 重启后的 stale job 恢复。
 
 use crate::audit::AuditStore;
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 
 /// 任务行 — 对应 jobs 表所有列。
 #[derive(Debug, Clone)]
@@ -94,19 +94,19 @@ impl AuditStore {
         conversation_id: Option<&str>,
         prompt: Option<&str>,
         workflow_id: Option<&str>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "INSERT INTO jobs (id, kind, input, status, created_at, provider, project_path, conversation_id, prompt, workflow_id) VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![id, kind, input, created_at, provider, project_path, conversation_id, prompt, workflow_id],
             )
-            .map_err(CheckpointError::SubmitJob)?;
+            .map_err(AgentAspectError::SubmitJob)?;
         Ok(())
     }
 
     /// 标记任务开始运行（无进程监控）。只更新 status='queued' 的行。
     /// 返回受影响行数（1 = 成功，0 = 状态已变更）。
-    pub fn update_job_started(&self, id: &str, started_at: &str) -> CheckpointResult<usize> {
+    pub fn update_job_started(&self, id: &str, started_at: &str) -> AgentAspectResult<usize> {
         self.update_job_started_supervised(id, started_at, None, None, None, None)
     }
 
@@ -120,7 +120,7 @@ impl AuditStore {
         process_group_id: Option<i64>,
         runner_id: Option<&str>,
         timeout_secs: Option<u64>,
-    ) -> CheckpointResult<usize> {
+    ) -> AgentAspectResult<usize> {
         let rows = self
             .conn
             .execute(
@@ -143,7 +143,7 @@ impl AuditStore {
                     timeout_secs.map(|v| v as i64)
                 ],
             )
-            .map_err(CheckpointError::UpdateJob)?;
+            .map_err(AgentAspectError::UpdateJob)?;
         Ok(rows)
     }
 
@@ -153,7 +153,7 @@ impl AuditStore {
         status: &str,
         finished_at: &str,
         exit_code: Option<i32>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.update_job_finished_with_reason(id, status, finished_at, exit_code, None)
     }
 
@@ -164,7 +164,7 @@ impl AuditStore {
         finished_at: &str,
         exit_code: Option<i32>,
         failure_reason: Option<&str>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.update_job_finished_with_completed_reason(
             id,
             status,
@@ -184,7 +184,7 @@ impl AuditStore {
         exit_code: Option<i32>,
         failure_reason: Option<&str>,
         completed_reason: Option<&str>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE jobs SET
@@ -204,7 +204,7 @@ impl AuditStore {
                     completed_reason
                 ],
             )
-            .map_err(CheckpointError::UpdateJob)?;
+            .map_err(AgentAspectError::UpdateJob)?;
         Ok(())
     }
 
@@ -213,7 +213,7 @@ impl AuditStore {
         &self,
         id: &str,
         conversation_id: &str,
-    ) -> CheckpointResult<bool> {
+    ) -> AgentAspectResult<bool> {
         let rows = self
             .conn
             .execute(
@@ -223,15 +223,19 @@ impl AuditStore {
                    AND (conversation_id IS NULL OR conversation_id = '')",
                 rusqlite::params![id, conversation_id],
             )
-            .map_err(CheckpointError::UpdateJob)?;
+            .map_err(AgentAspectError::UpdateJob)?;
         Ok(rows > 0)
     }
 
-    pub fn cancel_job(&self, id: &str) -> CheckpointResult<bool> {
+    pub fn cancel_job(&self, id: &str) -> AgentAspectResult<bool> {
         self.cancel_job_with_reason(id, None)
     }
 
-    pub fn cancel_job_with_reason(&self, id: &str, reason: Option<&str>) -> CheckpointResult<bool> {
+    pub fn cancel_job_with_reason(
+        &self,
+        id: &str,
+        reason: Option<&str>,
+    ) -> AgentAspectResult<bool> {
         let now = chrono::Utc::now().to_rfc3339();
         let rows = self
             .conn
@@ -245,7 +249,7 @@ impl AuditStore {
                  WHERE id = ?1 AND status IN ('running', 'queued', 'observing')",
                 rusqlite::params![id, now, reason],
             )
-            .map_err(CheckpointError::UpdateJob)?;
+            .map_err(AgentAspectError::UpdateJob)?;
         Ok(rows > 0)
     }
 
@@ -254,39 +258,43 @@ impl AuditStore {
         id: &str,
         runner_id: &str,
         timestamp: &str,
-    ) -> CheckpointResult<bool> {
+    ) -> AgentAspectResult<bool> {
         let rows = self
             .conn
             .execute(
                 "UPDATE jobs SET heartbeat_at = ?3 WHERE id = ?1 AND runner_id = ?2 AND status IN ('running', 'observing')",
                 rusqlite::params![id, runner_id, timestamp],
             )
-            .map_err(CheckpointError::UpdateJob)?;
+            .map_err(AgentAspectError::UpdateJob)?;
         Ok(rows > 0)
     }
 
     /// 将 job 状态改为 observing（soft timeout 后进入观察期）。
     /// 不设 finished_at，job 仍在进行中。
-    pub fn update_job_observing(&self, id: &str, timestamp: &str) -> CheckpointResult<bool> {
+    pub fn update_job_observing(&self, id: &str, timestamp: &str) -> AgentAspectResult<bool> {
         let rows = self
             .conn
             .execute(
                 "UPDATE jobs SET status = 'observing', heartbeat_at = ?2 WHERE id = ?1 AND status = 'running'",
                 rusqlite::params![id, timestamp],
             )
-            .map_err(CheckpointError::UpdateJob)?;
+            .map_err(AgentAspectError::UpdateJob)?;
         Ok(rows > 0)
     }
 
     /// 将 job 从 observing 状态恢复为 running（观察到新活动）。
-    pub fn update_job_observing_revert(&self, id: &str, timestamp: &str) -> CheckpointResult<bool> {
+    pub fn update_job_observing_revert(
+        &self,
+        id: &str,
+        timestamp: &str,
+    ) -> AgentAspectResult<bool> {
         let rows = self
             .conn
             .execute(
                 "UPDATE jobs SET status = 'running', heartbeat_at = ?2 WHERE id = ?1 AND status = 'observing'",
                 rusqlite::params![id, timestamp],
             )
-            .map_err(CheckpointError::UpdateJob)?;
+            .map_err(AgentAspectError::UpdateJob)?;
         Ok(rows > 0)
     }
 
@@ -297,7 +305,7 @@ impl AuditStore {
         pid: i64,
         process_group_id: i64,
         timestamp: &str,
-    ) -> CheckpointResult<bool> {
+    ) -> AgentAspectResult<bool> {
         let rows = self
             .conn
             .execute(
@@ -308,7 +316,7 @@ impl AuditStore {
                  WHERE id = ?1 AND runner_id = ?2 AND status = 'running'",
                 rusqlite::params![id, runner_id, pid, process_group_id, timestamp],
             )
-            .map_err(CheckpointError::UpdateJob)?;
+            .map_err(AgentAspectError::UpdateJob)?;
         Ok(rows > 0)
     }
 
@@ -317,7 +325,7 @@ impl AuditStore {
         &self,
         runner_id: &str,
         timestamp: &str,
-    ) -> CheckpointResult<usize> {
+    ) -> AgentAspectResult<usize> {
         let stale_jobs = self.list_active_jobs_not_owned_by(runner_id)?;
         for job in &stale_jobs {
             let reason = "bridge restarted before job completed";
@@ -332,7 +340,7 @@ impl AuditStore {
                      WHERE id = ?1 AND status IN ('queued', 'running', 'observing')",
                     rusqlite::params![job.id, timestamp, reason],
                 )
-                .map_err(CheckpointError::UpdateJob)?;
+                .map_err(AgentAspectError::UpdateJob)?;
             let _ = self.insert_job_log(
                 &job.id,
                 "system",
@@ -344,7 +352,7 @@ impl AuditStore {
         Ok(stale_jobs.len())
     }
 
-    pub fn list_active_jobs_not_owned_by(&self, runner_id: &str) -> CheckpointResult<Vec<JobRow>> {
+    pub fn list_active_jobs_not_owned_by(&self, runner_id: &str) -> AgentAspectResult<Vec<JobRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -356,12 +364,12 @@ impl AuditStore {
              WHERE status IN ('queued', 'running', 'observing') AND (runner_id IS NULL OR runner_id != ?1)
              ORDER BY created_at ASC",
             )
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         let rows = stmt
             .query_map(rusqlite::params![runner_id], Self::map_job_row)
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryJob)
+            .map_err(AgentAspectError::QueryJob)
     }
 
     /// 追加一条任务日志并更新 jobs.last_log_at。
@@ -372,23 +380,23 @@ impl AuditStore {
         chunk: &str,
         seq: i64,
         timestamp: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "INSERT INTO job_logs (job_id, stream, chunk, seq, timestamp) VALUES (?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![job_id, stream, chunk, seq, timestamp],
             )
-            .map_err(CheckpointError::JobLog)?;
+            .map_err(AgentAspectError::JobLog)?;
         self.conn
             .execute(
                 "UPDATE jobs SET last_log_at = ?2 WHERE id = ?1",
                 rusqlite::params![job_id, timestamp],
             )
-            .map_err(CheckpointError::UpdateJob)?;
+            .map_err(AgentAspectError::UpdateJob)?;
         Ok(())
     }
 
-    pub fn get_job(&self, id: &str) -> CheckpointResult<Option<JobRow>> {
+    pub fn get_job(&self, id: &str) -> AgentAspectResult<Option<JobRow>> {
         self.conn
             .query_row(
                 "SELECT id, kind, input, status, created_at, started_at, finished_at, exit_code,
@@ -402,7 +410,7 @@ impl AuditStore {
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                _ => Err(CheckpointError::QueryJob(e)),
+                _ => Err(AgentAspectError::QueryJob(e)),
             })
     }
 
@@ -411,7 +419,7 @@ impl AuditStore {
         limit: usize,
         offset: usize,
         status_filter: Option<&str>,
-    ) -> CheckpointResult<Vec<JobRow>> {
+    ) -> AgentAspectResult<Vec<JobRow>> {
         let mut sql = String::from(
             "SELECT id, kind, input, status, created_at, started_at, finished_at, exit_code,
                     provider, project_path, conversation_id, prompt, pid, process_group_id,
@@ -430,26 +438,29 @@ impl AuditStore {
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
 
-        let mut stmt = self.conn.prepare(&sql).map_err(CheckpointError::QueryJob)?;
+        let mut stmt = self
+            .conn
+            .prepare(&sql)
+            .map_err(AgentAspectError::QueryJob)?;
         let rows = stmt
             .query_map(param_refs.as_slice(), Self::map_job_row)
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryJob)
+            .map_err(AgentAspectError::QueryJob)
     }
 
-    pub fn get_job_logs(&self, job_id: &str) -> CheckpointResult<Vec<JobLogRow>> {
+    pub fn get_job_logs(&self, job_id: &str) -> AgentAspectResult<Vec<JobLogRow>> {
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT id, job_id, stream, chunk, seq, timestamp FROM job_logs WHERE job_id = ?1 ORDER BY seq ASC",
             )
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         let rows = stmt
             .query_map(rusqlite::params![job_id], Self::map_job_log_row)
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryJob)
+            .map_err(AgentAspectError::QueryJob)
     }
 
     /// 增量日志查询 — 返回 id > after_id 的日志，用于 SSE 流式推送。
@@ -459,7 +470,7 @@ impl AuditStore {
         job_id: &str,
         after_id: i64,
         limit: usize,
-    ) -> CheckpointResult<Vec<JobLogRow>> {
+    ) -> AgentAspectResult<Vec<JobLogRow>> {
         let limit = limit.min(500) as i64;
         let mut stmt = self
             .conn
@@ -470,38 +481,38 @@ impl AuditStore {
                  ORDER BY id ASC
                  LIMIT ?3",
             )
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         let rows = stmt
             .query_map(
                 rusqlite::params![job_id, after_id, limit],
                 Self::map_job_log_row,
             )
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryJob)
+            .map_err(AgentAspectError::QueryJob)
     }
 
-    pub fn count_running_jobs(&self) -> CheckpointResult<usize> {
+    pub fn count_running_jobs(&self) -> AgentAspectResult<usize> {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM jobs WHERE status = 'running'",
                 [],
                 |row| row.get::<_, usize>(0),
             )
-            .map_err(CheckpointError::QueryJob)
+            .map_err(AgentAspectError::QueryJob)
     }
 
-    pub fn count_active_jobs(&self) -> CheckpointResult<usize> {
+    pub fn count_active_jobs(&self) -> AgentAspectResult<usize> {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM jobs WHERE status IN ('queued', 'running', 'observing')",
                 [],
                 |row| row.get::<_, usize>(0),
             )
-            .map_err(CheckpointError::QueryJob)
+            .map_err(AgentAspectError::QueryJob)
     }
 
-    pub fn count_jobs(&self, status_filter: Option<&str>) -> CheckpointResult<usize> {
+    pub fn count_jobs(&self, status_filter: Option<&str>) -> AgentAspectResult<usize> {
         match status_filter {
             Some(s) => self
                 .conn
@@ -510,18 +521,18 @@ impl AuditStore {
                     rusqlite::params![s],
                     |row| row.get::<_, usize>(0),
                 )
-                .map_err(CheckpointError::QueryJob),
+                .map_err(AgentAspectError::QueryJob),
             None => self
                 .conn
                 .query_row("SELECT COUNT(*) FROM jobs", [], |row| {
                     row.get::<_, usize>(0)
                 })
-                .map_err(CheckpointError::QueryJob),
+                .map_err(AgentAspectError::QueryJob),
         }
     }
 
     /// Set stop_requested_at on a running/observing job. Returns affected rows.
-    pub fn set_stop_requested_at(&self, job_id: &str, timestamp: &str) -> CheckpointResult<usize> {
+    pub fn set_stop_requested_at(&self, job_id: &str, timestamp: &str) -> AgentAspectResult<usize> {
         let rows = self
             .conn
             .execute(
@@ -530,7 +541,7 @@ impl AuditStore {
                    AND stop_requested_at IS NULL",
                 rusqlite::params![job_id, timestamp],
             )
-            .map_err(CheckpointError::UpdateJob)?;
+            .map_err(AgentAspectError::UpdateJob)?;
         Ok(rows)
     }
 
@@ -539,7 +550,7 @@ impl AuditStore {
         &self,
         provider: &str,
         conversation_id: &str,
-    ) -> CheckpointResult<Option<JobRow>> {
+    ) -> AgentAspectResult<Option<JobRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -552,15 +563,15 @@ impl AuditStore {
                    AND provider = ?1 AND conversation_id = ?2
                  ORDER BY started_at DESC LIMIT 1",
             )
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         let mut rows = stmt
             .query_map(
                 rusqlite::params![provider, conversation_id],
                 Self::map_job_row,
             )
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         match rows.next() {
-            Some(row) => Ok(Some(row.map_err(CheckpointError::QueryJob)?)),
+            Some(row) => Ok(Some(row.map_err(AgentAspectError::QueryJob)?)),
             None => Ok(None),
         }
     }
@@ -570,7 +581,7 @@ impl AuditStore {
         &self,
         provider: &str,
         project_path: &str,
-    ) -> CheckpointResult<Option<JobRow>> {
+    ) -> AgentAspectResult<Option<JobRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -583,19 +594,19 @@ impl AuditStore {
                    AND provider = ?1 AND project_path = ?2
                  ORDER BY started_at DESC LIMIT 1",
             )
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         let mut rows = stmt
             .query_map(rusqlite::params![provider, project_path], Self::map_job_row)
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         match rows.next() {
-            Some(row) => Ok(Some(row.map_err(CheckpointError::QueryJob)?)),
+            Some(row) => Ok(Some(row.map_err(AgentAspectError::QueryJob)?)),
             None => Ok(None),
         }
     }
 
     /// Get all running/observing jobs that have stop_requested_at set.
     /// Used by bridge tick to converge stopped jobs.
-    pub fn get_jobs_with_stop_requested(&self) -> CheckpointResult<Vec<JobRow>> {
+    pub fn get_jobs_with_stop_requested(&self) -> AgentAspectResult<Vec<JobRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -607,11 +618,11 @@ impl AuditStore {
                  WHERE status IN ('running', 'observing')
                    AND stop_requested_at IS NOT NULL",
             )
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         let rows = stmt
             .query_map([], Self::map_job_row)
-            .map_err(CheckpointError::QueryJob)?;
+            .map_err(AgentAspectError::QueryJob)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryJob)
+            .map_err(AgentAspectError::QueryJob)
     }
 }

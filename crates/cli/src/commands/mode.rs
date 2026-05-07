@@ -5,8 +5,8 @@
 //!
 //! 合法值：observer / autonomous / guard / paranoid。
 
-use checkpoint_core::config::Config;
-use checkpoint_core::rule::Mode;
+use agent_aspect_core::config::Config;
+use agent_aspect_core::rule::Mode;
 
 /// 查看或设置运行模式。
 ///

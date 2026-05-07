@@ -1,14 +1,14 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-/// BinaryLocator — locates the agent-aspect (or legacy checkpoint) binary.
+/// BinaryLocator — locates the agent-aspect binary.
 ///
 /// Search order:
 ///   1. App resource dir `Binaries/` (release mode)
 ///   2. AGENT_ASPECT_DEV_BIN_DIR environment variable (dev mode)
 ///   3. PATH fallback via `which`
 
-const BINARY_NAME: &str = "checkpoint";
+const BINARY_NAME: &str = "agent-aspect";
 
 /// Returns the full path to the agent-aspect binary, or None if not found.
 pub fn locate_binary(resource_dir: Option<&PathBuf>) -> Option<PathBuf> {

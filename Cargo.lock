@@ -9,6 +9,93 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agent-aspect-bridge"
+version = "0.1.0"
+dependencies = [
+ "agent-aspect-core",
+ "base64",
+ "chrono",
+ "getrandom 0.3.4",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tiny_http",
+ "tungstenite 0.26.2",
+ "ureq",
+ "uuid",
+]
+
+[[package]]
+name = "agent-aspect-cli"
+version = "0.1.0"
+dependencies = [
+ "agent-aspect-core",
+ "atty",
+ "chrono",
+ "libc",
+ "rpassword",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "agent-aspect-core"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "chrono",
+ "getrandom 0.4.2",
+ "hex",
+ "libc",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "shlex",
+ "thiserror",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "agent-aspect-daemon"
+version = "0.1.0"
+dependencies = [
+ "agent-aspect-core",
+ "chrono",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "agent-aspect-hook"
+version = "0.1.0"
+dependencies = [
+ "agent-aspect-core",
+ "serde_json",
+]
+
+[[package]]
+name = "agent-aspect-relay"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64",
+ "chrono",
+ "futures-util",
+ "getrandom 0.3.4",
+ "hmac",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tower-http",
+ "uuid",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -182,93 +269,6 @@ name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
-
-[[package]]
-name = "checkpoint-bridge"
-version = "0.1.0"
-dependencies = [
- "base64",
- "checkpoint-core",
- "chrono",
- "getrandom 0.3.4",
- "libc",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tiny_http",
- "tungstenite 0.26.2",
- "ureq",
- "uuid",
-]
-
-[[package]]
-name = "checkpoint-cli"
-version = "0.1.0"
-dependencies = [
- "atty",
- "checkpoint-core",
- "chrono",
- "libc",
- "rpassword",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "checkpoint-core"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "chrono",
- "getrandom 0.4.2",
- "hex",
- "libc",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "shlex",
- "thiserror",
- "toml",
- "uuid",
-]
-
-[[package]]
-name = "checkpoint-daemon"
-version = "0.1.0"
-dependencies = [
- "checkpoint-core",
- "chrono",
- "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "checkpoint-hook"
-version = "0.1.0"
-dependencies = [
- "checkpoint-core",
- "serde_json",
-]
-
-[[package]]
-name = "checkpoint-relay"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64",
- "chrono",
- "futures-util",
- "getrandom 0.3.4",
- "hmac",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tower-http",
- "uuid",
-]
 
 [[package]]
 name = "chrono"

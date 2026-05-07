@@ -1,16 +1,11 @@
 //! 文件系统路径 — DB、配置、PID、socket、launchd plist 等标准位置。
 //!
-//! 路径读取优先级：
-//! 1. `~/.agent-aspect/`（新）
-//! 2. `~/.checkpoint/`（旧兼容）
-//! 3. `/tmp`（$HOME 缺失时 fallback）
-//!
-//! 新安装写入 `~/.agent-aspect/`；若只存在旧目录，则沿用旧目录以保持兼容。
+//! M44 后只读写 `~/.agent-aspect/`，不再回退旧目录，避免 socket、token、
+//! config 和 state 分裂成两套运行身份。
 
 use std::path::PathBuf;
 
 const AGENT_ASPECT_DIR: &str = ".agent-aspect";
-const LEGACY_DIR: &str = ".checkpoint";
 const SOCKET_FILE: &str = "ipc.sock";
 const AUDIT_DB_FILE: &str = "audit.db";
 const CONFIG_FILE: &str = "config.toml";
@@ -49,31 +44,13 @@ fn home_dir() -> PathBuf {
     PathBuf::from("/tmp")
 }
 
-/// 基础目录。优先 `~/.agent-aspect/`，不存在时回退 `~/.checkpoint/`。
+/// 基础目录：唯一使用 `~/.agent-aspect/`。
 fn base_dir() -> PathBuf {
-    let home = home_dir();
-    let new_dir = home.join(AGENT_ASPECT_DIR);
-    if new_dir.exists() {
-        return new_dir;
-    }
-    let legacy_dir = PathBuf::from(&home).join(LEGACY_DIR);
-    if legacy_dir.exists() {
-        return legacy_dir;
-    }
-    // 两者都不存在：返回新目录（写入时使用）
-    new_dir
+    home_dir().join(AGENT_ASPECT_DIR)
 }
 
 fn join_in_base(file_name: &str) -> PathBuf {
     base_dir().join(file_name)
-}
-
-/// 是否正在使用旧目录（doctor 用来提示迁移）。
-pub fn using_legacy_dir() -> bool {
-    let home = home_dir();
-    let new_dir = home.join(AGENT_ASPECT_DIR);
-    let legacy_dir = home.join(LEGACY_DIR);
-    !new_dir.exists() && legacy_dir.exists()
 }
 
 /// Unix domain socket 路径（用于 CLI ↔ daemon IPC）。
@@ -96,8 +73,8 @@ pub fn state_path() -> PathBuf {
     join_in_base(STATE_FILE)
 }
 
-/// 当前活跃的数据目录。
-pub fn checkpoint_dir() -> PathBuf {
+/// Agent Aspect 数据目录。
+pub fn agent_aspect_dir() -> PathBuf {
     base_dir()
 }
 

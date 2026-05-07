@@ -14,17 +14,17 @@
 //! - 每次 accept 连接后重新读取配置，支持热重载 mode。
 //! - 审计数据启动时执行 retention purge，防止数据库无限增长。
 
-use checkpoint_core::audit::AuditStore;
-use checkpoint_core::config::Config;
-use checkpoint_core::decision::Action;
-use checkpoint_core::event::AgentId;
-use checkpoint_core::normalize::{
+use agent_aspect_core::audit::AuditStore;
+use agent_aspect_core::config::Config;
+use agent_aspect_core::decision::Action;
+use agent_aspect_core::event::AgentId;
+use agent_aspect_core::normalize::{
     normalize_claude_pre_tool_use, normalize_codex_pre_tool_use, normalize_gemini_pre_tool_use,
     normalize_kimi_pre_tool_use,
 };
-use checkpoint_core::paths;
-use checkpoint_core::rule::{Mode, RuleEngine};
-use checkpoint_core::wire::{OverrideRequest, WireRequest, WireResponse};
+use agent_aspect_core::paths;
+use agent_aspect_core::rule::{Mode, RuleEngine};
+use agent_aspect_core::wire::{OverrideRequest, WireRequest, WireResponse};
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Mutex;
@@ -82,7 +82,7 @@ macro_rules! log_info {
 
 /// 从配置文件或环境变量解析运行模式。
 ///
-/// 优先级：配置文件 > CHECKPOINT_MODE 环境变量 > 默认 Guard。
+/// 优先级：配置文件 > AGENT_ASPECT_MODE 环境变量 > 默认 Guard。
 /// 配置文件不存在时生成默认配置。
 fn resolve_mode() -> Mode {
     let config_path = Config::config_path();
@@ -99,8 +99,8 @@ fn resolve_mode() -> Mode {
         return cfg.mode;
     }
 
-    // fallback: AGENT_ASPECT_MODE / CHECKPOINT_MODE env
-    checkpoint_core::env_compat::env_var("AGENT_ASPECT_MODE", "CHECKPOINT_MODE")
+    // fallback: AGENT_ASPECT_MODE / AGENT_ASPECT_MODE env
+    agent_aspect_core::env_compat::env_var("AGENT_ASPECT_MODE")
         .and_then(|raw| raw.parse::<Mode>().ok())
         .unwrap_or(Mode::Guard)
 }
@@ -290,7 +290,7 @@ fn handle_metadata(
     store: &AuditStore,
     stream: &mut UnixStream,
 ) {
-    use checkpoint_core::conversation::{
+    use agent_aspect_core::conversation::{
         conversation_db_id, extract_prompt_metadata, extract_session_start_metadata, generate_title,
     };
 
@@ -376,7 +376,7 @@ fn handle_stop(
     store: &AuditStore,
     stream: &mut UnixStream,
 ) {
-    use checkpoint_core::conversation::extract_conversation_id;
+    use agent_aspect_core::conversation::extract_conversation_id;
 
     let agent_str = match agent {
         Some(a) => a.as_str(),
@@ -402,7 +402,7 @@ fn handle_stop(
         })
         .or_else(|| {
             let project_path =
-                checkpoint_core::conversation::extract_project_path(agent_str, payload);
+                agent_aspect_core::conversation::extract_project_path(agent_str, payload);
             project_path.as_deref().and_then(|pp| {
                 store
                     .find_running_job_by_project(provider, pp)
@@ -558,7 +558,7 @@ fn main() {
     // 单例守卫：杀掉已运行的旧 daemon 实例
     let state_path = paths::state_path();
     if let Some(old_pid) =
-        checkpoint_core::process_guard::kill_existing(&state_path, "agent-aspectd")
+        agent_aspect_core::process_guard::kill_existing(&state_path, "agent-aspectd")
     {
         log_info!("replaced previous daemon (pid {old_pid})");
     }

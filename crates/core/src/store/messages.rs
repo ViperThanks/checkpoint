@@ -4,7 +4,7 @@
 //! 同步状态（line_offset / file_size / mtime）用于断点续传。
 
 use crate::audit::AuditStore;
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 
 /// 同步状态行 — 记录上次同步位置，用于增量续传。
 #[derive(Debug, Clone)]
@@ -22,14 +22,14 @@ pub struct SyncStateRow {
 
 impl AuditStore {
     /// Get the max seq for a conversation. Returns 0 if no messages exist.
-    pub fn max_seq_for_conversation(&self, conversation_id: &str) -> CheckpointResult<i64> {
+    pub fn max_seq_for_conversation(&self, conversation_id: &str) -> AgentAspectResult<i64> {
         self.conn
             .query_row(
                 "SELECT COALESCE(MAX(seq), 0) FROM conversation_messages WHERE conversation_id = ?1",
                 rusqlite::params![conversation_id],
                 |row| row.get(0),
             )
-            .map_err(CheckpointError::QueryConversationMessages)
+            .map_err(AgentAspectError::QueryConversationMessages)
     }
 
     /// Atomically insert messages and upsert sync state in one transaction.
@@ -54,13 +54,13 @@ impl AuditStore {
             String,         // 13 created_at
         )],
         state: &SyncStateRow,
-    ) -> CheckpointResult<(usize, i64)> {
+    ) -> AgentAspectResult<(usize, i64)> {
         self.conn
             .execute_batch("BEGIN IMMEDIATE")
-            .map_err(CheckpointError::InsertConversationMessage)?;
+            .map_err(AgentAspectError::InsertConversationMessage)?;
 
         let mut inserted = 0usize;
-        let result: CheckpointResult<i64> = (|| {
+        let result: AgentAspectResult<i64> = (|| {
             for msg in messages {
                 let n = self
                     .conn
@@ -74,7 +74,7 @@ impl AuditStore {
                             msg.10, msg.11, msg.12, msg.13
                         ],
                     )
-                    .map_err(CheckpointError::InsertConversationMessage)?;
+                    .map_err(AgentAspectError::InsertConversationMessage)?;
                 inserted += n;
             }
             // Count total messages after inserts (includes pre-existing + new)
@@ -114,7 +114,7 @@ impl AuditStore {
                         state.last_error
                     ],
                 )
-                .map_err(CheckpointError::UpsertSyncState)?;
+                .map_err(AgentAspectError::UpsertSyncState)?;
             Ok(total)
         })();
 
@@ -122,7 +122,7 @@ impl AuditStore {
             Ok(total) => {
                 self.conn
                     .execute_batch("COMMIT")
-                    .map_err(CheckpointError::InsertConversationMessage)?;
+                    .map_err(AgentAspectError::InsertConversationMessage)?;
                 Ok((inserted, total))
             }
             Err(e) => {
@@ -138,7 +138,7 @@ impl AuditStore {
         conversation_id: &str,
         limit: usize,
         offset: usize,
-    ) -> CheckpointResult<Vec<serde_json::Value>> {
+    ) -> AgentAspectResult<Vec<serde_json::Value>> {
         let total: i64 = self
             .conn
             .query_row(
@@ -146,7 +146,7 @@ impl AuditStore {
                 rusqlite::params![conversation_id],
                 |row| row.get(0),
             )
-            .map_err(CheckpointError::QueryConversationMessages)?;
+            .map_err(AgentAspectError::QueryConversationMessages)?;
 
         // Reverse pagination: offset=0 returns the newest `limit` messages
         let end = total.saturating_sub(offset as i64);
@@ -158,7 +158,7 @@ impl AuditStore {
              WHERE conversation_id = ?1
              ORDER BY seq ASC
              LIMIT ?2 OFFSET ?3"
-        ).map_err(CheckpointError::QueryConversationMessages)?;
+        ).map_err(AgentAspectError::QueryConversationMessages)?;
 
         let rows = stmt
             .query_map(
@@ -178,10 +178,10 @@ impl AuditStore {
                     }))
                 },
             )
-            .map_err(CheckpointError::QueryConversationMessages)?;
+            .map_err(AgentAspectError::QueryConversationMessages)?;
 
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryConversationMessages)
+            .map_err(AgentAspectError::QueryConversationMessages)
     }
 
     /// Get messages with seq > after_seq (for delta endpoint).
@@ -190,14 +190,14 @@ impl AuditStore {
         conversation_id: &str,
         after_seq: i64,
         limit: usize,
-    ) -> CheckpointResult<Vec<serde_json::Value>> {
+    ) -> AgentAspectResult<Vec<serde_json::Value>> {
         let mut stmt = self.conn.prepare(
             "SELECT role, timestamp, text, source, turn_id, tool_name, tool_input_preview, tool_input_full, thinking, seq
              FROM conversation_messages
              WHERE conversation_id = ?1 AND seq > ?2
              ORDER BY seq ASC
              LIMIT ?3"
-        ).map_err(CheckpointError::QueryConversationMessages)?;
+        ).map_err(AgentAspectError::QueryConversationMessages)?;
 
         let rows = stmt
             .query_map(
@@ -217,41 +217,41 @@ impl AuditStore {
                     }))
                 },
             )
-            .map_err(CheckpointError::QueryConversationMessages)?;
+            .map_err(AgentAspectError::QueryConversationMessages)?;
 
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryConversationMessages)
+            .map_err(AgentAspectError::QueryConversationMessages)
     }
 
     /// Count cached messages for a conversation.
     pub fn count_conversation_cached_messages(
         &self,
         conversation_id: &str,
-    ) -> CheckpointResult<i64> {
+    ) -> AgentAspectResult<i64> {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM conversation_messages WHERE conversation_id = ?1",
                 rusqlite::params![conversation_id],
                 |row| row.get(0),
             )
-            .map_err(CheckpointError::QueryConversationMessages)
+            .map_err(AgentAspectError::QueryConversationMessages)
     }
 
     /// Get the total count of cached messages (for total field).
-    pub fn total_conversation_messages(&self, conversation_id: &str) -> CheckpointResult<i64> {
+    pub fn total_conversation_messages(&self, conversation_id: &str) -> AgentAspectResult<i64> {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM conversation_messages WHERE conversation_id = ?1",
                 rusqlite::params![conversation_id],
                 |row| row.get(0),
             )
-            .map_err(CheckpointError::QueryConversationMessages)
+            .map_err(AgentAspectError::QueryConversationMessages)
     }
 
     // ---- Conversation Sync State ----
 
     /// Get sync state for a conversation.
-    pub fn get_sync_state(&self, conversation_id: &str) -> CheckpointResult<Option<SyncStateRow>> {
+    pub fn get_sync_state(&self, conversation_id: &str) -> AgentAspectResult<Option<SyncStateRow>> {
         self.conn
             .query_row(
                 "SELECT conversation_id, transcript_path, file_size_bytes, file_mtime_ms,
@@ -275,12 +275,12 @@ impl AuditStore {
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                _ => Err(CheckpointError::QuerySyncState(e)),
+                _ => Err(AgentAspectError::QuerySyncState(e)),
             })
     }
 
     /// Upsert sync state for a conversation.
-    pub fn upsert_sync_state(&self, state: &SyncStateRow) -> CheckpointResult<()> {
+    pub fn upsert_sync_state(&self, state: &SyncStateRow) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "INSERT INTO conversation_sync_state
@@ -307,24 +307,24 @@ impl AuditStore {
                     state.last_error
                 ],
             )
-            .map_err(CheckpointError::UpsertSyncState)?;
+            .map_err(AgentAspectError::UpsertSyncState)?;
         Ok(())
     }
 
     /// Clear all cached messages and sync state for a conversation.
-    pub fn clear_conversation_cache(&self, conversation_id: &str) -> CheckpointResult<()> {
+    pub fn clear_conversation_cache(&self, conversation_id: &str) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "DELETE FROM conversation_messages WHERE conversation_id = ?1",
                 rusqlite::params![conversation_id],
             )
-            .map_err(CheckpointError::ClearConversationMessages)?;
+            .map_err(AgentAspectError::ClearConversationMessages)?;
         self.conn
             .execute(
                 "DELETE FROM conversation_sync_state WHERE conversation_id = ?1",
                 rusqlite::params![conversation_id],
             )
-            .map_err(CheckpointError::ClearConversationMessages)?;
+            .map_err(AgentAspectError::ClearConversationMessages)?;
         Ok(())
     }
 }

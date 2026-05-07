@@ -16,10 +16,10 @@
 //! - conversation_id：有 → 继续会话（provider 加 resume 参数）；
 //!   无 → 新建会话。这里不做 provider 级别的静默丢弃
 
-use checkpoint_core::audit::AuditStore;
-use checkpoint_core::provider_registry::ProviderRegistry;
-use checkpoint_core::provider_resolver::ProviderResolver;
-use checkpoint_core::runtime_profile::{
+use agent_aspect_core::audit::AuditStore;
+use agent_aspect_core::provider_registry::ProviderRegistry;
+use agent_aspect_core::provider_resolver::ProviderResolver;
+use agent_aspect_core::runtime_profile::{
     RuntimeHealth, RuntimeHealthStatus, compute_runtime_health, probe_identity,
 };
 use sha2::{Digest, Sha256};
@@ -41,9 +41,6 @@ const ALLOWED_KINDS: &[&str] = &[
     "cargo_test",
     "smoke_test",
     "agent_aspect_mode",
-    // 兼容旧客户端提交的历史 kind。
-    "checkpoint_status",
-    "checkpoint_mode",
     "custom_prompt",
     "agent_prompt",
 ];
@@ -237,7 +234,7 @@ impl JobRunner {
 
             if let Some(cid) = conversation_id {
                 // 继续会话：比较当前 identity 与存储值
-                let db_id = checkpoint_core::conversation::conversation_db_id(agent, cid);
+                let db_id = agent_aspect_core::conversation::conversation_db_id(agent, cid);
                 if let Ok(Some(conv)) = store.get_conversation(&db_id) {
                     if let Some(obj) = command_input.as_object_mut() {
                         obj.insert(
@@ -245,7 +242,7 @@ impl JobRunner {
                             serde_json::json!(conv.permission_mode.clone()),
                         );
                     }
-                    let stored_identity = checkpoint_core::runtime_profile::RuntimeIdentity {
+                    let stored_identity = agent_aspect_core::runtime_profile::RuntimeIdentity {
                         model_id: conv.model_id.clone(),
                         profile_name: conv.runtime_profile.clone(),
                         workspace_path: conv.project_path.clone(),
@@ -307,12 +304,12 @@ impl JobRunner {
         if kind == "agent_prompt" {
             if let Some(cid) = conversation_id {
                 let agent = provider.unwrap_or("unknown");
-                let db_id = checkpoint_core::conversation::conversation_db_id(agent, cid);
+                let db_id = agent_aspect_core::conversation::conversation_db_id(agent, cid);
                 if let Ok(Some(conv)) = store.get_conversation(&db_id) {
                     let tokens = conv.cached_token_count.unwrap_or(conv.token_count);
                     let file_size = conv.cached_file_size_bytes.unwrap_or(conv.file_size_bytes);
                     let messages = conv.event_count;
-                    use checkpoint_core::constants::*;
+                    use agent_aspect_core::constants::*;
                     let is_critical = tokens >= RESUME_TOKEN_CRITICAL
                         || file_size >= RESUME_FILE_SIZE_CRITICAL
                         || messages >= RESUME_MESSAGE_CRITICAL;
@@ -440,7 +437,7 @@ impl JobRunner {
         if kind == "agent_prompt" {
             if let (Some(agent), Some(cid)) = (provider, conversation_id) {
                 let _ = store.touch_conversation_by_agent_cid(agent, cid, &now);
-                let db_id = checkpoint_core::conversation::conversation_db_id(agent, cid);
+                let db_id = agent_aspect_core::conversation::conversation_db_id(agent, cid);
                 let _ = store.update_conversation_counts(&db_id, 0, 0, 0, 1);
             }
         }
@@ -682,7 +679,10 @@ impl JobRunner {
         Ok(job_id)
     }
 
-    pub fn get_job(&self, job_id: &str) -> Result<Option<checkpoint_core::audit::JobRow>, String> {
+    pub fn get_job(
+        &self,
+        job_id: &str,
+    ) -> Result<Option<agent_aspect_core::audit::JobRow>, String> {
         let store = AuditStore::open(&self.db_path).map_err(|e| format!("open db: {e}"))?;
         store.get_job(job_id).map_err(|e| format!("query job: {e}"))
     }
@@ -692,7 +692,7 @@ impl JobRunner {
         limit: usize,
         offset: usize,
         status: Option<&str>,
-    ) -> Result<(Vec<checkpoint_core::audit::JobRow>, usize), String> {
+    ) -> Result<(Vec<agent_aspect_core::audit::JobRow>, usize), String> {
         let store = AuditStore::open(&self.db_path).map_err(|e| format!("open db: {e}"))?;
         let total = store
             .count_jobs(status)
@@ -706,7 +706,7 @@ impl JobRunner {
     pub fn get_job_logs(
         &self,
         job_id: &str,
-    ) -> Result<Vec<checkpoint_core::audit::JobLogRow>, String> {
+    ) -> Result<Vec<agent_aspect_core::audit::JobLogRow>, String> {
         let store = AuditStore::open(&self.db_path).map_err(|e| format!("open db: {e}"))?;
         store
             .get_job_logs(job_id)
@@ -718,7 +718,7 @@ impl JobRunner {
         job_id: &str,
         after_id: i64,
         limit: usize,
-    ) -> Result<Vec<checkpoint_core::audit::JobLogRow>, String> {
+    ) -> Result<Vec<agent_aspect_core::audit::JobLogRow>, String> {
         let store = AuditStore::open(&self.db_path).map_err(|e| format!("open db: {e}"))?;
         store
             .get_job_logs_after(job_id, after_id, limit)
@@ -767,13 +767,13 @@ impl JobRunner {
 }
 
 /// 从 job 的 provider + conversation_id 构造 DB 中的会话 ID。
-fn job_conversation_db_id(j: &checkpoint_core::audit::JobRow) -> Option<String> {
+fn job_conversation_db_id(j: &agent_aspect_core::audit::JobRow) -> Option<String> {
     let provider = j.provider.as_deref()?;
     let conversation_id = j.conversation_id.as_deref()?;
     if conversation_id.is_empty() {
         None
     } else {
-        Some(checkpoint_core::conversation::conversation_db_id(
+        Some(agent_aspect_core::conversation::conversation_db_id(
             provider,
             conversation_id,
         ))
@@ -804,7 +804,7 @@ fn build_command(
         .unwrap_or(default_project_dir);
 
     match kind {
-        "agent_aspect_status" | "checkpoint_status" => {
+        "agent_aspect_status" => {
             let mut cmd = std::process::Command::new("agent-aspect");
             cmd.arg("status");
             cmd.current_dir(&home);
@@ -834,7 +834,7 @@ fn build_command(
             cmd.current_dir(&project_dir);
             Ok(cmd)
         }
-        "agent_aspect_mode" | "checkpoint_mode" => {
+        "agent_aspect_mode" => {
             let mode = input
                 .get("mode")
                 .and_then(|v| v.as_str())
@@ -1569,7 +1569,7 @@ fn bind_provider_conversation(job_id: &str, db_path: &PathBuf) {
         .as_deref()
         .map(short_title)
         .unwrap_or_else(|| format!("{} conversation", provider));
-    let db_id = checkpoint_core::conversation::conversation_db_id(provider, &conversation_id);
+    let db_id = agent_aspect_core::conversation::conversation_db_id(provider, &conversation_id);
 
     if let Err(e) = store.upsert_conversation_from_metadata(
         &db_id,
@@ -1636,7 +1636,7 @@ fn bind_recent_unbound_provider_conversations(db_path: &PathBuf) {
 /// 不同 provider 的日志格式不同，需要分别处理。
 fn extract_provider_conversation_id(
     provider: &str,
-    logs: &[checkpoint_core::audit::JobLogRow],
+    logs: &[agent_aspect_core::audit::JobLogRow],
 ) -> Option<String> {
     match provider {
         "kimi_code" => logs
@@ -1708,8 +1708,8 @@ fn read_stream<R: Read>(
 mod tests {
     use super::*;
 
-    fn log(stream: &str, chunk: &str) -> checkpoint_core::audit::JobLogRow {
-        checkpoint_core::audit::JobLogRow {
+    fn log(stream: &str, chunk: &str) -> agent_aspect_core::audit::JobLogRow {
+        agent_aspect_core::audit::JobLogRow {
             id: 1,
             job_id: "job-1".to_string(),
             stream: stream.to_string(),
@@ -1741,11 +1741,11 @@ mod tests {
     }
 
     fn make_registry() -> ProviderRegistry {
-        ProviderRegistry::from_config(&checkpoint_core::config::Config::default_config())
+        ProviderRegistry::from_config(&agent_aspect_core::config::Config::default_config())
     }
 
     fn make_resolver_with_binary(provider: &str, path: &str) -> ProviderResolver {
-        let mut config = checkpoint_core::config::Config::default_config();
+        let mut config = agent_aspect_core::config::Config::default_config();
         config
             .provider_binaries
             .insert(provider.to_string(), path.to_string());
@@ -1862,7 +1862,7 @@ mod tests {
             "provider": "claude_code",
             "prompt": "continue",
             "conversation_id": "sess-xyz",
-            "runtime_permission_mode": checkpoint_core::constants::PERMISSION_MODE_BYPASS,
+            "runtime_permission_mode": agent_aspect_core::constants::PERMISSION_MODE_BYPASS,
         });
         let registry = make_registry();
         let result = build_command(
@@ -1916,9 +1916,9 @@ mod tests {
 
     #[test]
     fn resume_guard_rejects_non_resume_provider() {
-        use checkpoint_core::provider_registry::ProviderConfigOverride;
+        use agent_aspect_core::provider_registry::ProviderConfigOverride;
         use std::collections::HashMap;
-        let mut config = checkpoint_core::config::Config::default_config();
+        let mut config = agent_aspect_core::config::Config::default_config();
         let mut providers = HashMap::new();
         providers.insert(
             "no_resume_tool".into(),
@@ -2055,8 +2055,8 @@ pub fn handle_post_jobs(
         }
     }
 
-    // Validate Agent Aspect mode input（兼容旧 kind）。
-    if kind == "agent_aspect_mode" || kind == "checkpoint_mode" {
+    // Validate Agent Aspect mode input.
+    if kind == "agent_aspect_mode" {
         if input.get("mode").and_then(|v| v.as_str()).is_none() {
             return json_response(
                 400,

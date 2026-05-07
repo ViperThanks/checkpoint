@@ -5,7 +5,7 @@
 //! 每一步关联一个 job_id，通过 context_strategy 控制日志传递。
 
 use crate::audit::AuditStore;
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 
 /// 工作流行 — 对应 workflows 表所有列。
 #[derive(Debug, Clone)]
@@ -89,46 +89,46 @@ impl AuditStore {
         name: &str,
         description: &str,
         created_at: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "INSERT INTO workflows (id, name, description, status, advance_mode, created_at, updated_at)
                  VALUES (?1, ?2, ?3, 'draft', 'auto', ?4, ?4)",
                 rusqlite::params![id, name, description, created_at],
             )
-            .map_err(CheckpointError::InsertWorkflow)?;
+            .map_err(AgentAspectError::InsertWorkflow)?;
         Ok(())
     }
 
     /// 获取单个工作流。
-    pub fn get_workflow(&self, id: &str) -> CheckpointResult<Option<WorkflowRow>> {
+    pub fn get_workflow(&self, id: &str) -> AgentAspectResult<Option<WorkflowRow>> {
         let mut stmt = self
             .conn
             .prepare("SELECT id, name, description, status, advance_mode, created_at, updated_at FROM workflows WHERE id = ?1")
-            .map_err(CheckpointError::QueryWorkflow)?;
+            .map_err(AgentAspectError::QueryWorkflow)?;
         let mut rows = stmt
             .query_map(rusqlite::params![id], Self::map_workflow_row)
-            .map_err(CheckpointError::QueryWorkflow)?;
+            .map_err(AgentAspectError::QueryWorkflow)?;
         match rows.next() {
-            Some(row) => Ok(Some(row.map_err(CheckpointError::QueryWorkflow)?)),
+            Some(row) => Ok(Some(row.map_err(AgentAspectError::QueryWorkflow)?)),
             None => Ok(None),
         }
     }
 
     /// 列出所有工作流，按创建时间倒序。
-    pub fn list_workflows(&self, limit: i64, offset: i64) -> CheckpointResult<Vec<WorkflowRow>> {
+    pub fn list_workflows(&self, limit: i64, offset: i64) -> AgentAspectResult<Vec<WorkflowRow>> {
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT id, name, description, status, advance_mode, created_at, updated_at
                  FROM workflows ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
             )
-            .map_err(CheckpointError::QueryWorkflow)?;
+            .map_err(AgentAspectError::QueryWorkflow)?;
         let rows = stmt
             .query_map(rusqlite::params![limit, offset], Self::map_workflow_row)
-            .map_err(CheckpointError::QueryWorkflow)?;
+            .map_err(AgentAspectError::QueryWorkflow)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryWorkflow)
+            .map_err(AgentAspectError::QueryWorkflow)
     }
 
     /// 更新工作流状态。允许从任何状态转移到新状态。
@@ -137,14 +137,14 @@ impl AuditStore {
         id: &str,
         status: &str,
         updated_at: &str,
-    ) -> CheckpointResult<usize> {
+    ) -> AgentAspectResult<usize> {
         let rows = self
             .conn
             .execute(
                 "UPDATE workflows SET status = ?2, updated_at = ?3 WHERE id = ?1",
                 rusqlite::params![id, status, updated_at],
             )
-            .map_err(CheckpointError::UpdateWorkflow)?;
+            .map_err(AgentAspectError::UpdateWorkflow)?;
         Ok(rows)
     }
 
@@ -155,7 +155,7 @@ impl AuditStore {
         name: &str,
         description: &str,
         updated_at: &str,
-    ) -> CheckpointResult<usize> {
+    ) -> AgentAspectResult<usize> {
         let rows = self
             .conn
             .execute(
@@ -163,7 +163,7 @@ impl AuditStore {
                  WHERE id = ?1 AND status IN ('draft', 'failed', 'cancelled')",
                 rusqlite::params![id, name, description, updated_at],
             )
-            .map_err(CheckpointError::UpdateWorkflow)?;
+            .map_err(AgentAspectError::UpdateWorkflow)?;
         Ok(rows)
     }
 
@@ -173,36 +173,36 @@ impl AuditStore {
         id: &str,
         advance_mode: &str,
         updated_at: &str,
-    ) -> CheckpointResult<usize> {
+    ) -> AgentAspectResult<usize> {
         let rows = self
             .conn
             .execute(
                 "UPDATE workflows SET advance_mode = ?2, updated_at = ?3 WHERE id = ?1",
                 rusqlite::params![id, advance_mode, updated_at],
             )
-            .map_err(CheckpointError::UpdateWorkflow)?;
+            .map_err(AgentAspectError::UpdateWorkflow)?;
         Ok(rows)
     }
 
     /// 删除工作流及其所有步骤。只允许 draft/failed/cancelled 状态。
     /// 返回：Ok(true) = 已删除，Ok(false) = not found，Err = running。
-    pub fn delete_workflow(&self, id: &str) -> CheckpointResult<bool> {
+    pub fn delete_workflow(&self, id: &str) -> AgentAspectResult<bool> {
         let wf = self.get_workflow(id)?;
         match wf {
-            Some(w) if w.status == "running" => Err(CheckpointError::WorkflowNotRunning),
+            Some(w) if w.status == "running" => Err(AgentAspectError::WorkflowNotRunning),
             Some(_) => {
                 let tx = self
                     .conn
                     .unchecked_transaction()
-                    .map_err(CheckpointError::UpdateWorkflow)?;
+                    .map_err(AgentAspectError::UpdateWorkflow)?;
                 tx.execute(
                     "DELETE FROM workflow_steps WHERE workflow_id = ?1",
                     rusqlite::params![id],
                 )
-                .map_err(CheckpointError::UpdateWorkflowStep)?;
+                .map_err(AgentAspectError::UpdateWorkflowStep)?;
                 tx.execute("DELETE FROM workflows WHERE id = ?1", rusqlite::params![id])
-                    .map_err(CheckpointError::UpdateWorkflow)?;
-                tx.commit().map_err(CheckpointError::UpdateWorkflow)?;
+                    .map_err(AgentAspectError::UpdateWorkflow)?;
+                tx.commit().map_err(AgentAspectError::UpdateWorkflow)?;
                 Ok(true)
             }
             None => Ok(false),
@@ -221,14 +221,14 @@ impl AuditStore {
         agent: &str,
         signal_type: &str,
         created_at: &str,
-    ) -> CheckpointResult<i64> {
+    ) -> AgentAspectResult<i64> {
         self.conn
             .execute(
                 "INSERT INTO workflow_advance_signals (workflow_id, step_id, agent, signal_type, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![workflow_id, step_id, agent, signal_type, created_at],
             )
-            .map_err(CheckpointError::InsertWorkflow)?;
+            .map_err(AgentAspectError::InsertWorkflow)?;
         Ok(self.conn.last_insert_rowid())
     }
 
@@ -236,7 +236,7 @@ impl AuditStore {
     pub fn poll_workflow_advance_signals(
         &self,
         workflow_id: &str,
-    ) -> CheckpointResult<Vec<WorkflowAdvanceSignalRow>> {
+    ) -> AgentAspectResult<Vec<WorkflowAdvanceSignalRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -245,7 +245,7 @@ impl AuditStore {
                  WHERE workflow_id = ?1 AND consumed_at IS NULL
                  ORDER BY id ASC",
             )
-            .map_err(CheckpointError::QueryWorkflow)?;
+            .map_err(AgentAspectError::QueryWorkflow)?;
         let rows = stmt
             .query_map(rusqlite::params![workflow_id], |row| {
                 Ok(WorkflowAdvanceSignalRow {
@@ -258,9 +258,9 @@ impl AuditStore {
                     created_at: row.get(6)?,
                 })
             })
-            .map_err(CheckpointError::QueryWorkflow)?;
+            .map_err(AgentAspectError::QueryWorkflow)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryWorkflow)
+            .map_err(AgentAspectError::QueryWorkflow)
     }
 
     /// 消费推进信号（bridge resume 后标记已处理）。
@@ -268,14 +268,14 @@ impl AuditStore {
         &self,
         id: i64,
         consumed_at: &str,
-    ) -> CheckpointResult<usize> {
+    ) -> AgentAspectResult<usize> {
         let rows = self
             .conn
             .execute(
                 "UPDATE workflow_advance_signals SET consumed_at = ?2 WHERE id = ?1",
                 rusqlite::params![id, consumed_at],
             )
-            .map_err(CheckpointError::UpdateWorkflow)?;
+            .map_err(AgentAspectError::UpdateWorkflow)?;
         Ok(rows)
     }
 
@@ -284,19 +284,19 @@ impl AuditStore {
         &self,
         step_orders: &[(String, i64)],
         updated_at: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         let tx = self
             .conn
             .unchecked_transaction()
-            .map_err(CheckpointError::UpdateWorkflowStep)?;
+            .map_err(AgentAspectError::UpdateWorkflowStep)?;
         for (step_id, new_order) in step_orders {
             tx.execute(
                 "UPDATE workflow_steps SET step_order = ?2 WHERE id = ?1",
                 rusqlite::params![step_id, new_order],
             )
-            .map_err(CheckpointError::UpdateWorkflowStep)?;
+            .map_err(AgentAspectError::UpdateWorkflowStep)?;
         }
-        tx.commit().map_err(CheckpointError::UpdateWorkflowStep)?;
+        tx.commit().map_err(AgentAspectError::UpdateWorkflowStep)?;
         let _ = updated_at; // reserved for future use
         Ok(())
     }
@@ -314,7 +314,7 @@ impl AuditStore {
         context_strategy: &str,
         context_from_step: Option<i64>,
         created_at: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "INSERT INTO workflow_steps
@@ -334,12 +334,12 @@ impl AuditStore {
                     created_at
                 ],
             )
-            .map_err(CheckpointError::InsertWorkflowStep)?;
+            .map_err(AgentAspectError::InsertWorkflowStep)?;
         Ok(())
     }
 
     /// 获取单个步骤。
-    pub fn get_workflow_step(&self, id: &str) -> CheckpointResult<Option<WorkflowStepRow>> {
+    pub fn get_workflow_step(&self, id: &str) -> AgentAspectResult<Option<WorkflowStepRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -347,18 +347,18 @@ impl AuditStore {
                         context_strategy, context_from_step, status, job_id, created_at, finished_at
                  FROM workflow_steps WHERE id = ?1",
             )
-            .map_err(CheckpointError::QueryWorkflowStep)?;
+            .map_err(AgentAspectError::QueryWorkflowStep)?;
         let mut rows = stmt
             .query_map(rusqlite::params![id], Self::map_workflow_step_row)
-            .map_err(CheckpointError::QueryWorkflowStep)?;
+            .map_err(AgentAspectError::QueryWorkflowStep)?;
         match rows.next() {
-            Some(row) => Ok(Some(row.map_err(CheckpointError::QueryWorkflowStep)?)),
+            Some(row) => Ok(Some(row.map_err(AgentAspectError::QueryWorkflowStep)?)),
             None => Ok(None),
         }
     }
 
     /// 获取工作流的所有步骤，按 step_order 排序。
-    pub fn get_workflow_steps(&self, workflow_id: &str) -> CheckpointResult<Vec<WorkflowStepRow>> {
+    pub fn get_workflow_steps(&self, workflow_id: &str) -> AgentAspectResult<Vec<WorkflowStepRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -366,12 +366,12 @@ impl AuditStore {
                         context_strategy, context_from_step, status, job_id, created_at, finished_at
                  FROM workflow_steps WHERE workflow_id = ?1 ORDER BY step_order ASC",
             )
-            .map_err(CheckpointError::QueryWorkflowStep)?;
+            .map_err(AgentAspectError::QueryWorkflowStep)?;
         let rows = stmt
             .query_map(rusqlite::params![workflow_id], Self::map_workflow_step_row)
-            .map_err(CheckpointError::QueryWorkflowStep)?;
+            .map_err(AgentAspectError::QueryWorkflowStep)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryWorkflowStep)
+            .map_err(AgentAspectError::QueryWorkflowStep)
     }
 
     /// 更新步骤状态。
@@ -380,26 +380,26 @@ impl AuditStore {
         id: &str,
         status: &str,
         finished_at: Option<&str>,
-    ) -> CheckpointResult<usize> {
+    ) -> AgentAspectResult<usize> {
         let rows = self
             .conn
             .execute(
                 "UPDATE workflow_steps SET status = ?2, finished_at = COALESCE(?3, finished_at) WHERE id = ?1",
                 rusqlite::params![id, status, finished_at],
             )
-            .map_err(CheckpointError::UpdateWorkflowStep)?;
+            .map_err(AgentAspectError::UpdateWorkflowStep)?;
         Ok(rows)
     }
 
     /// 绑定步骤的 job_id（仅当当前值为空时更新）。
-    pub fn update_workflow_step_job(&self, id: &str, job_id: &str) -> CheckpointResult<bool> {
+    pub fn update_workflow_step_job(&self, id: &str, job_id: &str) -> AgentAspectResult<bool> {
         let rows = self
             .conn
             .execute(
                 "UPDATE workflow_steps SET job_id = ?2 WHERE id = ?1 AND (job_id IS NULL OR job_id = '')",
                 rusqlite::params![id, job_id],
             )
-            .map_err(CheckpointError::UpdateWorkflowStep)?;
+            .map_err(AgentAspectError::UpdateWorkflowStep)?;
         Ok(rows > 0)
     }
 
@@ -408,7 +408,7 @@ impl AuditStore {
         &self,
         workflow_id: &str,
         step_order: i64,
-    ) -> CheckpointResult<Option<WorkflowStepRow>> {
+    ) -> AgentAspectResult<Option<WorkflowStepRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -416,15 +416,15 @@ impl AuditStore {
                         context_strategy, context_from_step, status, job_id, created_at, finished_at
                  FROM workflow_steps WHERE workflow_id = ?1 AND step_order = ?2",
             )
-            .map_err(CheckpointError::QueryWorkflowStep)?;
+            .map_err(AgentAspectError::QueryWorkflowStep)?;
         let mut rows = stmt
             .query_map(
                 rusqlite::params![workflow_id, step_order],
                 Self::map_workflow_step_row,
             )
-            .map_err(CheckpointError::QueryWorkflowStep)?;
+            .map_err(AgentAspectError::QueryWorkflowStep)?;
         match rows.next() {
-            Some(row) => Ok(Some(row.map_err(CheckpointError::QueryWorkflowStep)?)),
+            Some(row) => Ok(Some(row.map_err(AgentAspectError::QueryWorkflowStep)?)),
             None => Ok(None),
         }
     }
@@ -433,7 +433,7 @@ impl AuditStore {
     pub fn get_next_pending_step(
         &self,
         workflow_id: &str,
-    ) -> CheckpointResult<Option<WorkflowStepRow>> {
+    ) -> AgentAspectResult<Option<WorkflowStepRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -442,18 +442,18 @@ impl AuditStore {
                  FROM workflow_steps WHERE workflow_id = ?1 AND status = 'pending'
                  ORDER BY step_order ASC LIMIT 1",
             )
-            .map_err(CheckpointError::QueryWorkflowStep)?;
+            .map_err(AgentAspectError::QueryWorkflowStep)?;
         let mut rows = stmt
             .query_map(rusqlite::params![workflow_id], Self::map_workflow_step_row)
-            .map_err(CheckpointError::QueryWorkflowStep)?;
+            .map_err(AgentAspectError::QueryWorkflowStep)?;
         match rows.next() {
-            Some(row) => Ok(Some(row.map_err(CheckpointError::QueryWorkflowStep)?)),
+            Some(row) => Ok(Some(row.map_err(AgentAspectError::QueryWorkflowStep)?)),
             None => Ok(None),
         }
     }
 
     /// 取消工作流中所有未完成的步骤。
-    pub fn cancel_workflow_steps(&self, workflow_id: &str) -> CheckpointResult<usize> {
+    pub fn cancel_workflow_steps(&self, workflow_id: &str) -> AgentAspectResult<usize> {
         let rows = self
             .conn
             .execute(
@@ -461,16 +461,16 @@ impl AuditStore {
                  WHERE workflow_id = ?1 AND status IN ('pending', 'running')",
                 rusqlite::params![workflow_id],
             )
-            .map_err(CheckpointError::UpdateWorkflowStep)?;
+            .map_err(AgentAspectError::UpdateWorkflowStep)?;
         Ok(rows)
     }
 
     /// 统计工作流总数。
-    pub fn count_workflows(&self) -> CheckpointResult<i64> {
+    pub fn count_workflows(&self) -> AgentAspectResult<i64> {
         let count: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM workflows", [], |row| row.get(0))
-            .map_err(CheckpointError::QueryWorkflow)?;
+            .map_err(AgentAspectError::QueryWorkflow)?;
         Ok(count)
     }
 
@@ -478,7 +478,7 @@ impl AuditStore {
     pub fn workflow_step_counts(
         &self,
         workflow_id: &str,
-    ) -> CheckpointResult<(i64, i64, i64, i64, i64)> {
+    ) -> AgentAspectResult<(i64, i64, i64, i64, i64)> {
         let (total, succeeded, failed, pending, skipped): (i64, i64, i64, i64, i64) = self
             .conn
             .query_row(
@@ -500,7 +500,7 @@ impl AuditStore {
                     ))
                 },
             )
-            .map_err(CheckpointError::QueryWorkflowStep)?;
+            .map_err(AgentAspectError::QueryWorkflowStep)?;
         Ok((total, succeeded, failed, pending, skipped))
     }
 }

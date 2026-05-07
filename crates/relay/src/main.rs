@@ -2,5 +2,5 @@
 
 #[tokio::main]
 async fn main() {
-    checkpoint_relay::run_server().await;
+    agent_aspect_relay::run_server().await;
 }

@@ -3,8 +3,8 @@
 //! 不经过 IPC，直接探测 Unix socket 是否可连接来判断 daemon 存活；
 //! 模式从 daemon 写的 state.json 读取（而非本进程 env），保证与 daemon 实际状态一致。
 
-use checkpoint_core::audit::AuditStore;
-use checkpoint_core::paths;
+use agent_aspect_core::audit::AuditStore;
+use agent_aspect_core::paths;
 
 /// 显示 agent-aspect 系统当前状态概览。
 ///

@@ -1,4 +1,4 @@
-//! checkpoint-core — AI Agent 安全护栏的共享核心库。
+//! agent-aspect-core — AI Agent 安全护栏的共享核心库。
 //!
 //! 为 CLI 和 bridge HTTP 服务器提供：审计存储、规则引擎、会话管理、
 //! provider 适配器、transcript 解析、配置管理。
@@ -53,7 +53,7 @@ impl Display for Mode {
 }
 
 impl FromStr for Mode {
-    type Err = crate::error::CheckpointError;
+    type Err = crate::error::AgentAspectError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
@@ -61,7 +61,7 @@ impl FromStr for Mode {
             "autonomous" => Ok(Self::Autonomous),
             "guard" => Ok(Self::Guard),
             "paranoid" => Ok(Self::Paranoid),
-            other => Err(crate::error::CheckpointError::InvalidMode(
+            other => Err(crate::error::AgentAspectError::InvalidMode(
                 other.to_string(),
             )),
         }

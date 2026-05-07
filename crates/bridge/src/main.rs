@@ -14,11 +14,11 @@
 //! - 每个非 SSE 请求在独立线程中处理，DB 通过 Arc<Mutex<>> 串行化
 //! - 后台 import 线程每 5 分钟执行一次，与请求线程共享 DB 连接
 
-use checkpoint_bridge::{auth, context::AppContext, jobs, relay_client, routes, sse, workflows};
-use checkpoint_core::config::Config;
-use checkpoint_core::paths;
-use checkpoint_core::provider_registry::ProviderRegistry;
-use checkpoint_core::provider_resolver::ProviderResolver;
+use agent_aspect_bridge::{auth, context::AppContext, jobs, relay_client, routes, sse, workflows};
+use agent_aspect_core::config::Config;
+use agent_aspect_core::paths;
+use agent_aspect_core::provider_registry::ProviderRegistry;
+use agent_aspect_core::provider_resolver::ProviderResolver;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -40,11 +40,7 @@ fn main() {
     // 1. 加载配置：环境变量优先于 config.toml
     let config = Config::load_or_create();
     let config_addr = config.bridge_addr.clone();
-    let addr = checkpoint_core::env_compat::env_var_or(
-        "AGENT_ASPECT_BRIDGE_ADDR",
-        "CHECKPOINT_BRIDGE_ADDR",
-        config_addr,
-    );
+    let addr = agent_aspect_core::env_compat::env_var_or("AGENT_ASPECT_BRIDGE_ADDR", config_addr);
 
     // 2. 加载或生成 Bearer token（首次启动时原子创建文件）
     let token = auth::load_or_create_token();
@@ -52,7 +48,7 @@ fn main() {
     // 3. 单例守护：杀掉上一个实例再绑定端口，避免端口冲突
     let state_path = paths::bridge_state_path();
     if let Some(old_pid) =
-        checkpoint_core::process_guard::kill_existing(&state_path, "agent-aspect-bridge")
+        agent_aspect_core::process_guard::kill_existing(&state_path, "agent-aspect-bridge")
     {
         eprintln!("agent-aspect-bridge: replaced previous instance (pid {old_pid})");
     }
@@ -104,7 +100,7 @@ fn main() {
         std::thread::spawn(move || {
             // 启动时立即执行一次，之后每 5 分钟执行
             let run_bg = || {
-                if let Ok(store) = checkpoint_core::audit::AuditStore::open(&db_path) {
+                if let Ok(store) = agent_aspect_core::audit::AuditStore::open(&db_path) {
                     routes::auto_import_titles_bg(&store, 10);
                     routes::warm_uncached_stats_bg(&store, 50);
                     routes::invalidate_overview_cache();
@@ -150,8 +146,7 @@ fn main() {
     );
 
     // 8. 可选启动 relay 客户端（配置了 relay_url 时才连接）
-    let relay_url_env =
-        checkpoint_core::env_compat::env_var("AGENT_ASPECT_RELAY_URL", "CHECKPOINT_RELAY_URL");
+    let relay_url_env = agent_aspect_core::env_compat::env_var("AGENT_ASPECT_RELAY_URL");
     let relay_url = relay_url_env
         .as_deref()
         .or(config.relay_url.as_deref())

@@ -1,7 +1,7 @@
 //! 事件 DAO — 工具使用事件的插入、查询、批量获取会话信息、过期清理。
 
 use crate::audit::AuditStore;
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 
 /// 事件行 — 对应 events 表。
 #[derive(Debug, Clone)]
@@ -31,7 +31,7 @@ impl AuditStore {
         file_path: Option<&str>,
         timestamp: &str,
         raw_payload: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         use crate::conversation;
 
         let conversation_id = conversation::extract_conversation_id(agent, raw_payload);
@@ -51,7 +51,7 @@ impl AuditStore {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 rusqlite::params![id, phase, event_type, agent, tool_name, file_path, timestamp, raw_payload, conversation_id.as_ref(), project_path.as_ref()],
             )
-            .map_err(CheckpointError::InsertEvent)?;
+            .map_err(AgentAspectError::InsertEvent)?;
 
         // Update conversation index if conversation_id is present
         if let Some(ref cid) = conversation_id {
@@ -69,7 +69,7 @@ impl AuditStore {
                 transcript_path.as_deref(),
             )?;
             if let Err(e) = self.update_conversation_counts(&db_id, 1, 0, 0, 0) {
-                eprintln!("checkpoint-audit: update conversation counts for {db_id}: {e}");
+                eprintln!("agent-aspect-audit: update conversation counts for {db_id}: {e}");
             }
             if let Some(permission_mode) = conversation::extract_permission_mode(raw_payload) {
                 let _ = self.update_runtime_permission_mode(&db_id, &permission_mode, Some(agent));
@@ -79,15 +79,15 @@ impl AuditStore {
         Ok(())
     }
 
-    pub fn event_count(&self) -> CheckpointResult<usize> {
+    pub fn event_count(&self) -> AgentAspectResult<usize> {
         self.conn
             .query_row("SELECT COUNT(*) FROM events", [], |row| {
                 row.get::<_, usize>(0)
             })
-            .map_err(CheckpointError::CountEvents)
+            .map_err(AgentAspectError::CountEvents)
     }
 
-    pub fn event_exists(&self, event_id: &str) -> CheckpointResult<bool> {
+    pub fn event_exists(&self, event_id: &str) -> AgentAspectResult<bool> {
         self.conn
             .query_row(
                 "SELECT 1 FROM events WHERE id = ?1 LIMIT 1",
@@ -97,7 +97,7 @@ impl AuditStore {
             .map(|_| true)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(false),
-                _ => Err(CheckpointError::QueryFeedback(e)),
+                _ => Err(AgentAspectError::QueryFeedback(e)),
             })
     }
 
@@ -105,7 +105,7 @@ impl AuditStore {
     pub fn event_conversation_info(
         &self,
         event_ids: &[String],
-    ) -> CheckpointResult<
+    ) -> AgentAspectResult<
         std::collections::HashMap<String, crate::store::conversations::ConversationInfo>,
     > {
         use std::collections::HashMap;
@@ -136,7 +136,7 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
                 let event_id: String = row.get(0)?;
@@ -158,11 +158,11 @@ impl AuditStore {
                     },
                 ))
             })
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
 
         let mut map = HashMap::new();
         for row in rows {
-            let (event_id, info) = row.map_err(CheckpointError::QueryFilteredDecisions)?;
+            let (event_id, info) = row.map_err(AgentAspectError::QueryFilteredDecisions)?;
             map.insert(event_id, info);
         }
         Ok(map)
@@ -170,14 +170,14 @@ impl AuditStore {
 
     /// 删除指定时间戳之前的旧事件、关联决策、孤立反馈。
     /// 返回 (events_deleted, decisions_deleted)。
-    pub fn purge_before(&self, before_timestamp: &str) -> CheckpointResult<(usize, usize)> {
+    pub fn purge_before(&self, before_timestamp: &str) -> AgentAspectResult<(usize, usize)> {
         // Delete decisions referencing events about to be purged
         self.conn
             .execute(
                 "DELETE FROM decisions WHERE event_id IN (SELECT id FROM events WHERE timestamp < ?1)",
                 rusqlite::params![before_timestamp],
             )
-            .map_err(CheckpointError::PurgeOldRecords)?;
+            .map_err(AgentAspectError::PurgeOldRecords)?;
 
         let events_deleted = self
             .conn
@@ -185,7 +185,7 @@ impl AuditStore {
                 "DELETE FROM events WHERE timestamp < ?1",
                 rusqlite::params![before_timestamp],
             )
-            .map_err(CheckpointError::PurgeOldRecords)?;
+            .map_err(AgentAspectError::PurgeOldRecords)?;
 
         let decisions_deleted = self
             .conn
@@ -193,7 +193,7 @@ impl AuditStore {
                 "DELETE FROM decisions WHERE timestamp < ?1",
                 rusqlite::params![before_timestamp],
             )
-            .map_err(CheckpointError::PurgeOldRecords)?;
+            .map_err(AgentAspectError::PurgeOldRecords)?;
 
         // Purge feedback for deleted events
         self.conn
@@ -201,7 +201,7 @@ impl AuditStore {
                 "DELETE FROM event_feedback WHERE event_id NOT IN (SELECT id FROM events)",
                 [],
             )
-            .map_err(CheckpointError::PurgeOldRecords)?;
+            .map_err(AgentAspectError::PurgeOldRecords)?;
 
         Ok((events_deleted, decisions_deleted))
     }

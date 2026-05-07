@@ -10,7 +10,7 @@
 //! - stop 流程先 SIGTERM，等 1 秒，未退出再 SIGKILL
 //! - relay URL 必须以 `ws://` 或 `wss://` 开头
 
-use checkpoint_core::{config::Config, paths, process_guard};
+use agent_aspect_core::{config::Config, paths, process_guard};
 
 use super::helpers::{bin_dir, run_launchctl};
 
@@ -525,7 +525,7 @@ fn bridge_password_show() {
 /// 重置 admin 密码：生成新随机密码，更新 SQLite 和文件。
 fn bridge_password_reset() {
     let store = open_bridge_store();
-    match checkpoint_core::user_password::reset_admin_password(&store) {
+    match agent_aspect_core::user_password::reset_admin_password(&store) {
         Ok(new_pwd) => println!("{new_pwd}"),
         Err(e) => {
             eprintln!("reset failed: {e}");
@@ -557,7 +557,7 @@ fn bridge_password_set() {
         std::process::exit(1);
     }
     let store = open_bridge_store();
-    if let Err(e) = checkpoint_core::user_password::set_admin_password(&store, &new_pwd) {
+    if let Err(e) = agent_aspect_core::user_password::set_admin_password(&store, &new_pwd) {
         eprintln!("set failed: {e}");
         std::process::exit(1);
     }
@@ -567,7 +567,7 @@ fn bridge_password_set() {
 /// 仅当 sys_user 为空时初始化 admin 用户。
 fn bridge_password_init() {
     let store = open_bridge_store();
-    if let Err(e) = checkpoint_core::user_password::init_admin_user(&store) {
+    if let Err(e) = agent_aspect_core::user_password::init_admin_user(&store) {
         eprintln!("init failed: {e}");
         std::process::exit(1);
     }
@@ -578,9 +578,9 @@ fn bridge_password_init() {
 }
 
 /// 打开 bridge 的 SQLite 数据库连接（CLI 用）。
-fn open_bridge_store() -> checkpoint_core::audit::AuditStore {
+fn open_bridge_store() -> agent_aspect_core::audit::AuditStore {
     let db_path = paths::audit_db_path();
-    checkpoint_core::audit::AuditStore::open(&db_path).unwrap_or_else(|e| {
+    agent_aspect_core::audit::AuditStore::open(&db_path).unwrap_or_else(|e| {
         eprintln!("cannot open database: {e}");
         std::process::exit(1);
     })
@@ -797,10 +797,10 @@ fn bridge_install(args: &[String]) {
     if let Some(parent) = plist_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    std::fs::create_dir_all(paths::checkpoint_dir()).ok();
+    std::fs::create_dir_all(paths::agent_aspect_dir()).ok();
 
-    let log_stdout = paths::checkpoint_dir().join("agent-aspect-bridge.stdout.log");
-    let log_stderr = paths::checkpoint_dir().join("agent-aspect-bridge.stderr.log");
+    let log_stdout = paths::agent_aspect_dir().join("agent-aspect-bridge.stdout.log");
+    let log_stderr = paths::agent_aspect_dir().join("agent-aspect-bridge.stderr.log");
 
     let program_arguments = if keep_awake {
         format!(

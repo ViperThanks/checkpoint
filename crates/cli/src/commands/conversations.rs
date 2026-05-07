@@ -3,9 +3,9 @@
 //! 目前只有一个子命令 `import-titles`：从 provider 的 transcript 文件
 //! 导入真实会话标题，替换 audit.db 中的 fallback 标题。
 
-use checkpoint_core::audit::AuditStore;
-use checkpoint_core::paths;
-use checkpoint_core::title_import;
+use agent_aspect_core::audit::AuditStore;
+use agent_aspect_core::paths;
+use agent_aspect_core::title_import;
 
 /// conversations 子命令入口。
 pub fn cmd_conversations(sub: Option<&str>) {

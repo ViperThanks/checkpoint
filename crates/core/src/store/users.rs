@@ -3,7 +3,7 @@
 //! 支持用户名密码登录的基础用户表，密码哈希由 `crate::password` 模块提供。
 
 use crate::audit::AuditStore;
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 
 /// sys_user 行类型。
 #[derive(Debug, Clone)]
@@ -30,19 +30,19 @@ impl AuditStore {
         role: &str,
         created_at: &str,
         updated_at: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "INSERT INTO sys_user (id, username, password_hash, password_salt, role, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params![id, username, password_hash, password_salt, role, created_at, updated_at],
             )
-            .map_err(CheckpointError::CreateUser)?;
+            .map_err(AgentAspectError::CreateUser)?;
         Ok(())
     }
 
     /// 按用户名查询用户。
-    pub fn get_user_by_username(&self, username: &str) -> CheckpointResult<Option<UserRow>> {
+    pub fn get_user_by_username(&self, username: &str) -> AgentAspectResult<Option<UserRow>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -50,7 +50,7 @@ impl AuditStore {
                         created_at, updated_at, last_login_at, disabled_at
                  FROM sys_user WHERE username = ?1",
             )
-            .map_err(CheckpointError::QueryUser)?;
+            .map_err(AgentAspectError::QueryUser)?;
         let row = stmt.query_row(rusqlite::params![username], |row: &rusqlite::Row| {
             Ok(UserRow {
                 id: row.get(0)?,
@@ -67,18 +67,18 @@ impl AuditStore {
         match row {
             Ok(u) => Ok(Some(u)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(CheckpointError::QueryUser(e)),
+            Err(e) => Err(AgentAspectError::QueryUser(e)),
         }
     }
 
     /// 更新最后登录时间。
-    pub fn update_last_login(&self, user_id: &str, timestamp: &str) -> CheckpointResult<()> {
+    pub fn update_last_login(&self, user_id: &str, timestamp: &str) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE sys_user SET last_login_at = ?1, updated_at = ?1 WHERE id = ?2",
                 rusqlite::params![timestamp, user_id],
             )
-            .map_err(CheckpointError::UpdateUser)?;
+            .map_err(AgentAspectError::UpdateUser)?;
         Ok(())
     }
 
@@ -89,18 +89,18 @@ impl AuditStore {
         password_hash: &str,
         password_salt: &str,
         updated_at: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE sys_user SET password_hash = ?1, password_salt = ?2, updated_at = ?3 WHERE id = ?4",
                 rusqlite::params![password_hash, password_salt, updated_at, user_id],
             )
-            .map_err(CheckpointError::UpdateUser)?;
+            .map_err(AgentAspectError::UpdateUser)?;
         Ok(())
     }
 
     /// 统计用户数量。
-    pub fn count_users(&self) -> CheckpointResult<i64> {
+    pub fn count_users(&self) -> AgentAspectResult<i64> {
         let count: i64 = self
             .conn
             .query_row(
@@ -108,7 +108,7 @@ impl AuditStore {
                 [],
                 |row: &rusqlite::Row| row.get(0),
             )
-            .map_err(CheckpointError::QueryUser)?;
+            .map_err(AgentAspectError::QueryUser)?;
         Ok(count)
     }
 }

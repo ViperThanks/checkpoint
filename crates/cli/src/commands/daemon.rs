@@ -5,7 +5,7 @@
 //!
 //! 进程管理依赖 `process_guard` crate 做单例守护（PID state 文件 + kill 验证）。
 
-use checkpoint_core::{paths, process_guard};
+use agent_aspect_core::{paths, process_guard};
 
 use super::helpers::bin_dir;
 

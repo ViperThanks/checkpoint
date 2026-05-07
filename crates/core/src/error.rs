@@ -1,12 +1,12 @@
 //! 统一错误类型 — 覆盖 DB、配置、协议解析、任务管理全链路。
 //!
 //! 所有变体都用 `#[source]` 保留底层错误链，方便调试。
-//! `CheckpointResult<T>` 是贯穿整个 crate 的标准返回类型。
+//! `AgentAspectResult<T>` 是贯穿整个 crate 的标准返回类型。
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum CheckpointError {
+pub enum AgentAspectError {
     #[error("open db failed: {0}")]
     OpenDb(#[source] rusqlite::Error),
 
@@ -209,4 +209,4 @@ pub enum CheckpointError {
     WorkflowStepDependency(String),
 }
 
-pub type CheckpointResult<T> = Result<T, CheckpointError>;
+pub type AgentAspectResult<T> = Result<T, AgentAspectError>;

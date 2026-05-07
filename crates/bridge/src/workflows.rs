@@ -10,9 +10,9 @@
 //! - 取消传播：workflow cancel 会取消当前运行的 job 和所有 pending steps
 //! - context_strategy 控制日志截断：none / last_50_lines / last_100_lines / full_log
 
-use checkpoint_core::audit::AuditStore;
-use checkpoint_core::error::CheckpointError;
-use checkpoint_core::store::workflows::WorkflowStepRow;
+use agent_aspect_core::audit::AuditStore;
+use agent_aspect_core::error::AgentAspectError;
+use agent_aspect_core::store::workflows::WorkflowStepRow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -781,7 +781,7 @@ pub fn handle_delete_workflow(
             &serde_json::json!({"id": workflow_id, "status": "deleted"}),
         ),
         Ok(false) => json_response(404, &serde_json::json!({"error": "workflow not found"})),
-        Err(CheckpointError::WorkflowNotRunning) => json_response(
+        Err(AgentAspectError::WorkflowNotRunning) => json_response(
             400,
             &serde_json::json!({"error": "cannot delete running workflow"}),
         ),

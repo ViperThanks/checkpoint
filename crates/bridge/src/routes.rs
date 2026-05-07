@@ -13,15 +13,15 @@
 //!
 //! 分页参数统一管理：DEFAULT_PAGE_SIZE / MAX_PAGE_SIZE。
 
-use checkpoint_core::audit::{
+use agent_aspect_core::audit::{
     AuditStore, ConversationInfo, ConversationRow, DecisionRow, FeedbackRow,
 };
-use checkpoint_core::config::Config;
-use checkpoint_core::provider_registry::ProviderRegistry;
-use checkpoint_core::rule::Mode;
-use checkpoint_core::title_import;
-use checkpoint_core::transcript;
-use checkpoint_core::transcript_sync;
+use agent_aspect_core::config::Config;
+use agent_aspect_core::provider_registry::ProviderRegistry;
+use agent_aspect_core::rule::Mode;
+use agent_aspect_core::title_import;
+use agent_aspect_core::transcript;
+use agent_aspect_core::transcript_sync;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
@@ -249,7 +249,7 @@ pub fn handle_post_login(
         return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
     }
 
-    if !checkpoint_core::password::verify_password(
+    if !agent_aspect_core::password::verify_password(
         password,
         &user.password_hash,
         &user.password_salt,
@@ -310,7 +310,7 @@ pub fn handle_post_password_change(
         }
     };
 
-    if !checkpoint_core::password::verify_password(
+    if !agent_aspect_core::password::verify_password(
         old_password,
         &user.password_hash,
         &user.password_salt,
@@ -318,7 +318,7 @@ pub fn handle_post_password_change(
         return json_response(401, &serde_json::json!({"error": "用户名或密码错误"}));
     }
 
-    let (hash, salt) = match checkpoint_core::password::hash_password(new_password) {
+    let (hash, salt) = match agent_aspect_core::password::hash_password(new_password) {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("agent-aspect-bridge: password change hash failed: {e}");
@@ -327,10 +327,10 @@ pub fn handle_post_password_change(
     };
 
     // 两阶段更新：先写文件，后改 DB，失败回滚
-    let password_path = checkpoint_core::paths::bridge_password_path();
+    let password_path = agent_aspect_core::paths::bridge_password_path();
     let old_file = std::fs::read_to_string(&password_path).ok();
     if let Err(e) =
-        checkpoint_core::user_password::overwrite_password_file(&password_path, new_password)
+        agent_aspect_core::user_password::overwrite_password_file(&password_path, new_password)
     {
         eprintln!("agent-aspect-bridge: password change write file failed: {e}");
         return json_response(500, &serde_json::json!({"error": "internal error"}));
@@ -341,7 +341,7 @@ pub fn handle_post_password_change(
         eprintln!("agent-aspect-bridge: password change DB update failed: {e}");
         // 回滚文件
         if let Some(old) = old_file {
-            let _ = checkpoint_core::user_password::overwrite_password_file(&password_path, &old);
+            let _ = agent_aspect_core::user_password::overwrite_password_file(&password_path, &old);
         } else {
             let _ = std::fs::remove_file(&password_path);
         }
@@ -964,7 +964,7 @@ pub fn handle_get_pending(ctx: &AppContext) -> tiny_http::ResponseBox {
         }
     };
 
-    let mut config = checkpoint_core::config::Config::load_or_create();
+    let mut config = agent_aspect_core::config::Config::load_or_create();
     config.approval_review.sanitize();
     let review_cfg = &config.approval_review;
 
@@ -994,8 +994,8 @@ pub fn handle_get_pending(ctx: &AppContext) -> tiny_http::ResponseBox {
 /// 根据 ApprovalReviewConfig 为每条 pending decision 生成 review payload。
 /// 前端只负责渲染，不重复拼业务语义。
 fn build_approval_review(
-    d: &checkpoint_core::audit::DecisionRow,
-    cfg: &checkpoint_core::config::ApprovalReviewConfig,
+    d: &agent_aspect_core::audit::DecisionRow,
+    cfg: &agent_aspect_core::config::ApprovalReviewConfig,
 ) -> serde_json::Value {
     let agent = agent_display_label(&d.agent);
 
@@ -1219,7 +1219,7 @@ pub fn warm_uncached_stats_bg(store: &AuditStore, limit: usize) {
         }
     };
     for conv in &convs {
-        let stats = match checkpoint_core::transcript::compute_stats(
+        let stats = match agent_aspect_core::transcript::compute_stats(
             &conv.agent,
             &conv.conversation_id,
             conv.project_path.as_deref(),
@@ -1340,7 +1340,7 @@ fn auto_import_titles(store: &AuditStore, limit: usize) {
             ) {
                 let _ = store.update_conversation_title(&conv.id, &title, &source);
             }
-            if let Some(messages) = checkpoint_core::transcript::read_transcript(
+            if let Some(messages) = agent_aspect_core::transcript::read_transcript(
                 &conv.agent,
                 &conv.conversation_id,
                 conv.project_path.as_deref(),
@@ -1392,7 +1392,7 @@ fn auto_import_claude_sessions(store: &AuditStore, limit: usize) {
             Some(transcript_path.to_string_lossy().as_ref()),
         )
         .unwrap_or_else(|| ("Claude Code".to_string(), "fallback".to_string()));
-        let db_id = checkpoint_core::conversation::conversation_db_id("claude_code", session_id);
+        let db_id = agent_aspect_core::conversation::conversation_db_id("claude_code", session_id);
         let _ = store.upsert_conversation_from_metadata(
             &db_id,
             "claude_code",
@@ -1459,7 +1459,7 @@ fn claude_transcript_cwd(path: &Path) -> Option<String> {
 fn claude_transcript_initial_permission_mode(path: &Path) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
     for line in content.lines().take(256) {
-        if let Some(mode) = checkpoint_core::conversation::extract_permission_mode(line) {
+        if let Some(mode) = agent_aspect_core::conversation::extract_permission_mode(line) {
             return Some(mode);
         }
     }
@@ -1501,7 +1501,7 @@ fn auto_import_codex_sessions(store: &AuditStore, limit: usize) {
         let last_seen_at =
             file_modified_rfc3339(&transcript_path).unwrap_or_else(|| updated_at.clone());
         let project_path = codex_rollout_cwd(&transcript_path);
-        let db_id = checkpoint_core::conversation::conversation_db_id("codex_cli", thread_id);
+        let db_id = agent_aspect_core::conversation::conversation_db_id("codex_cli", thread_id);
         let _ = store.upsert_conversation_from_metadata(
             &db_id,
             "codex_cli",
@@ -1872,11 +1872,13 @@ pub fn handle_get_conversation_runtime_check(
     };
 
     // 1. 探测当前环境 identity
-    let current_identity =
-        checkpoint_core::runtime_profile::probe_identity(&conv.agent, conv.project_path.as_deref());
+    let current_identity = agent_aspect_core::runtime_profile::probe_identity(
+        &conv.agent,
+        conv.project_path.as_deref(),
+    );
 
     // 2. 构造存储的 identity
-    let stored_identity = checkpoint_core::runtime_profile::RuntimeIdentity {
+    let stored_identity = agent_aspect_core::runtime_profile::RuntimeIdentity {
         model_id: conv.model_id.clone(),
         profile_name: conv.runtime_profile.clone(),
         workspace_path: conv.project_path.clone(),
@@ -1887,7 +1889,7 @@ pub fn handle_get_conversation_runtime_check(
     };
 
     // 3. 比较
-    let health = checkpoint_core::runtime_profile::compute_runtime_health(
+    let health = agent_aspect_core::runtime_profile::compute_runtime_health(
         &stored_identity,
         &current_identity,
     );
@@ -1906,9 +1908,9 @@ pub fn handle_get_conversation_runtime_check(
         )
     };
     let cost_mode = match health.status {
-        checkpoint_core::runtime_profile::RuntimeHealthStatus::Critical => Some("critical"),
-        checkpoint_core::runtime_profile::RuntimeHealthStatus::Warning => Some("warning"),
-        checkpoint_core::runtime_profile::RuntimeHealthStatus::Ok => Some("ok"),
+        agent_aspect_core::runtime_profile::RuntimeHealthStatus::Critical => Some("critical"),
+        agent_aspect_core::runtime_profile::RuntimeHealthStatus::Warning => Some("warning"),
+        agent_aspect_core::runtime_profile::RuntimeHealthStatus::Ok => Some("ok"),
     };
     let _ = store.update_runtime_warning(cid, warning_text.as_deref(), cost_mode);
 
@@ -2013,12 +2015,13 @@ fn extract_turn_id(raw: &Option<String>) -> Option<String> {
 
 fn aggregate_codex_activities(
     conv: &ConversationRow,
-    events: &[checkpoint_core::audit::EventRow],
+    events: &[agent_aspect_core::audit::EventRow],
     decisions: &[DecisionRow],
 ) -> Vec<serde_json::Value> {
     use std::collections::BTreeMap;
 
-    let mut turn_groups: BTreeMap<String, Vec<&checkpoint_core::audit::EventRow>> = BTreeMap::new();
+    let mut turn_groups: BTreeMap<String, Vec<&agent_aspect_core::audit::EventRow>> =
+        BTreeMap::new();
     let mut turn_order: Vec<String> = Vec::new();
 
     for e in events {
@@ -2089,7 +2092,7 @@ fn aggregate_codex_activities(
 
 fn aggregate_time_window_activities(
     conv: &ConversationRow,
-    events: &[checkpoint_core::audit::EventRow],
+    events: &[agent_aspect_core::audit::EventRow],
     decisions: &[DecisionRow],
 ) -> Vec<serde_json::Value> {
     let decision_map: std::collections::HashMap<&str, &DecisionRow> =
@@ -2172,7 +2175,7 @@ fn aggregate_time_window_activities(
 
 fn aggregate_transcript_activities(
     conv: &ConversationRow,
-    messages: &[checkpoint_core::transcript::TranscriptMessage],
+    messages: &[agent_aspect_core::transcript::TranscriptMessage],
 ) -> Vec<serde_json::Value> {
     use std::collections::BTreeMap;
 
@@ -2625,7 +2628,7 @@ fn collect_activity_fallback(store: &AuditStore, cid: &str) -> Vec<serde_json::V
 // ---- Rules API ----
 
 pub fn handle_get_rules() -> tiny_http::ResponseBox {
-    use checkpoint_core::rule::RuleEngine;
+    use agent_aspect_core::rule::RuleEngine;
     let engine = RuleEngine::with_defaults(read_mode());
     let rules: Vec<serde_json::Value> = engine
         .rules()
@@ -2685,14 +2688,14 @@ fn decode_token_payload(token: &str) -> Option<serde_json::Value> {
 pub fn handle_get_relay_status() -> tiny_http::ResponseBox {
     let config = Config::load_or_create();
 
-    let relay_url = config.relay_url.or_else(|| {
-        checkpoint_core::env_compat::env_var("AGENT_ASPECT_RELAY_URL", "CHECKPOINT_RELAY_URL")
-    });
+    let relay_url = config
+        .relay_url
+        .or_else(|| agent_aspect_core::env_compat::env_var("AGENT_ASPECT_RELAY_URL"));
 
     let enabled = relay_url.is_some();
     let mobile_url = relay_url.as_deref().and_then(derive_mobile_url);
 
-    let client_token_path = checkpoint_core::paths::relay_client_token_path();
+    let client_token_path = agent_aspect_core::paths::relay_client_token_path();
     let client_token_available = client_token_path.exists();
 
     // Check if token is not expired (best-effort)
@@ -2728,9 +2731,9 @@ pub fn handle_get_relay_status() -> tiny_http::ResponseBox {
 pub fn handle_get_relay_pairing() -> tiny_http::ResponseBox {
     let config = Config::load_or_create();
 
-    let relay_url = config.relay_url.or_else(|| {
-        checkpoint_core::env_compat::env_var("AGENT_ASPECT_RELAY_URL", "CHECKPOINT_RELAY_URL")
-    });
+    let relay_url = config
+        .relay_url
+        .or_else(|| agent_aspect_core::env_compat::env_var("AGENT_ASPECT_RELAY_URL"));
 
     let mobile_url = match relay_url.as_deref().and_then(derive_mobile_url) {
         Some(u) => u,
@@ -2739,7 +2742,7 @@ pub fn handle_get_relay_pairing() -> tiny_http::ResponseBox {
         }
     };
 
-    let client_token_path = checkpoint_core::paths::relay_client_token_path();
+    let client_token_path = agent_aspect_core::paths::relay_client_token_path();
     let client_token = match std::fs::read_to_string(&client_token_path) {
         Ok(t) => t.trim().to_string(),
         Err(_) => {
@@ -2835,7 +2838,7 @@ mod relay_tests {
 
 pub fn handle_get_learn_suggestions(ctx: &AppContext) -> tiny_http::ResponseBox {
     let store = ctx.store.lock().unwrap();
-    if let Err(e) = checkpoint_core::learn::generate_suggestions(&store) {
+    if let Err(e) = agent_aspect_core::learn::generate_suggestions(&store) {
         eprintln!("generate suggestions: {e}");
     }
     match store.list_pending_suggestions(100) {

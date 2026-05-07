@@ -371,7 +371,7 @@ mod tests {
     }
 
     /// 不存在的目录，用于让 PATH 搜索必定失败（不影响 resolver 测试自己的 PATH 设置）。
-    const VOID_PATH: &str = "/nonexistent/checkpoint-test-void";
+    const VOID_PATH: &str = "/nonexistent/agent-aspect-test-void";
 
     #[test]
     fn binary_found_probe_success() {

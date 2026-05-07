@@ -4,22 +4,9 @@ use std::path::PathBuf;
 
 /// AgentAspectPaths — centralized path resolution for Agent Aspect data.
 ///
-/// Prefers `~/.agent-aspect/` (new canonical location). Falls back to
-/// `~/.checkpoint/` (legacy) when the new directory does not exist but the
-/// legacy one does.
-
-/// Primary data directory. Prefers `~/.agent-aspect`, falls back to
-/// `~/.checkpoint` if only the legacy directory exists.
+/// M44 后只使用 `~/.agent-aspect/`，不再保留旧目录 fallback。
 pub fn data_dir() -> PathBuf {
-    let new_dir = home_dir().join(".agent-aspect");
-    if new_dir.exists() {
-        return new_dir;
-    }
-    let legacy_dir = home_dir().join(".checkpoint");
-    if legacy_dir.exists() {
-        return legacy_dir;
-    }
-    new_dir
+    home_dir().join(".agent-aspect")
 }
 
 pub fn bridge_port_path() -> PathBuf {

@@ -3,8 +3,8 @@
 //! 直接读 audit.db，不走 IPC。支持 `agent-aspect audit <N>` 指定条数，默认 20。
 //! 输出时间戳截断到秒（前 19 字符），避免 ISO 精度过长影响可读性。
 
-use checkpoint_core::audit::AuditStore;
-use checkpoint_core::paths;
+use agent_aspect_core::audit::AuditStore;
+use agent_aspect_core::paths;
 
 /// 显示最近的审计决策记录。
 ///

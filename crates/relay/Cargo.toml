@@ -1,5 +1,5 @@
 [package]
-name = "checkpoint-relay"
+name = "agent-aspect-relay"
 version = "0.1.0"
 edition = "2024"
 license.workspace = true

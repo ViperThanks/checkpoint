@@ -106,7 +106,7 @@ pub fn sync_conversation_messages(
 
     if needs_rebuild {
         if let Err(e) = store.clear_conversation_cache(cache_id) {
-            eprintln!("checkpoint-sync: clear cache for {cache_id}: {e}");
+            eprintln!("agent-aspect-sync: clear cache for {cache_id}: {e}");
         }
     }
 
@@ -141,7 +141,7 @@ pub fn sync_conversation_messages(
             Ok(_) => skipped += 1,
             Err(e) => {
                 eprintln!(
-                    "checkpoint-sync: skip line {skipped}/{} for {cache_id}: {e}",
+                    "agent-aspect-sync: skip line {skipped}/{} for {cache_id}: {e}",
                     line_offset
                 );
                 break;
@@ -153,10 +153,10 @@ pub fn sync_conversation_messages(
     // truncated/rewritten without changing size or mtime), rebuild from scratch.
     if skipped < line_offset {
         eprintln!(
-            "checkpoint-sync: line_offset={line_offset} but only {skipped} lines in file for {cache_id}, rebuilding"
+            "agent-aspect-sync: line_offset={line_offset} but only {skipped} lines in file for {cache_id}, rebuilding"
         );
         if let Err(e) = store.clear_conversation_cache(cache_id) {
-            eprintln!("checkpoint-sync: clear cache for {cache_id}: {e}");
+            eprintln!("agent-aspect-sync: clear cache for {cache_id}: {e}");
         }
         // Re-open and read from start
         let file = match std::fs::File::open(&file_path) {
@@ -319,7 +319,7 @@ fn sync_from_reader(
             last_error: last_error.clone(),
         };
         if let Err(e) = store.upsert_sync_state(&sync_state_out) {
-            eprintln!("checkpoint-sync: upsert sync state for {cache_id}: {e}");
+            eprintln!("agent-aspect-sync: upsert sync state for {cache_id}: {e}");
         }
         SyncResult {
             messages_synced: 0,

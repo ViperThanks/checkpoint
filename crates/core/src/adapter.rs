@@ -4,11 +4,11 @@
 //! `AgentAdapter` trait 定义了 normalize（输入归一化）和 format_response（输出封装）。
 //! `AgentId::adapter()` 按枚举变体返回对应实现。
 
-use crate::error::CheckpointResult;
+use crate::error::AgentAspectResult;
 use crate::event::{AgentId, UnifiedEvent};
 use crate::wire::HookResponse;
 
-/// Contract for integrating a new AI agent into Checkpoint.
+/// Contract for integrating a new AI agent into Agent Aspect.
 ///
 /// Each supported agent implements this trait to define:
 /// 1. How to detect its hook payloads (normalize)
@@ -44,7 +44,7 @@ pub trait AgentAdapter: Send + Sync {
     fn hook_event_name(&self) -> &'static str;
 
     /// Parse a raw hook payload into a normalized UnifiedEvent.
-    fn normalize(&self, raw_payload: &str) -> CheckpointResult<UnifiedEvent>;
+    fn normalize(&self, raw_payload: &str) -> AgentAspectResult<UnifiedEvent>;
 
     /// Format a deny/ask response the agent understands.
     /// Returns None for allow (no output needed).
@@ -73,7 +73,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
         "PreToolUse"
     }
 
-    fn normalize(&self, raw_payload: &str) -> CheckpointResult<UnifiedEvent> {
+    fn normalize(&self, raw_payload: &str) -> AgentAspectResult<UnifiedEvent> {
         crate::normalize::normalize_claude_pre_tool_use(raw_payload)
     }
 
@@ -95,7 +95,7 @@ impl AgentAdapter for CodexCliAdapter {
         "PreToolUse"
     }
 
-    fn normalize(&self, raw_payload: &str) -> CheckpointResult<UnifiedEvent> {
+    fn normalize(&self, raw_payload: &str) -> AgentAspectResult<UnifiedEvent> {
         crate::normalize::normalize_codex_pre_tool_use(raw_payload)
     }
 
@@ -117,7 +117,7 @@ impl AgentAdapter for KimiCodeAdapter {
         "PreToolUse"
     }
 
-    fn normalize(&self, raw_payload: &str) -> CheckpointResult<UnifiedEvent> {
+    fn normalize(&self, raw_payload: &str) -> AgentAspectResult<UnifiedEvent> {
         crate::normalize::normalize_kimi_pre_tool_use(raw_payload)
     }
 
@@ -139,7 +139,7 @@ impl AgentAdapter for GeminiCliAdapter {
         "BeforeTool"
     }
 
-    fn normalize(&self, raw_payload: &str) -> CheckpointResult<UnifiedEvent> {
+    fn normalize(&self, raw_payload: &str) -> AgentAspectResult<UnifiedEvent> {
         crate::normalize::normalize_gemini_pre_tool_use(raw_payload)
     }
 

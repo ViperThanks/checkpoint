@@ -6,7 +6,7 @@
 #   2. Binary exists after build
 #   3. Binary is executable
 #   4. Resources/Binaries/ directory exists
-#   5. checkpoint binary is findable via PATH (optional)
+#   5. agent-aspect binary is findable via PATH (optional)
 #
 # Usage: ./scripts/smoke-mac-shell.sh
 
@@ -61,14 +61,14 @@ else
     fail "Resources/Binaries/ not found"
 fi
 
-# 5. checkpoint binary in PATH (optional)
+# 5. agent-aspect binary in PATH (optional)
 echo ""
-echo "[5/5] checkpoint binary in PATH..."
-if command -v checkpoint &>/dev/null; then
-    CP_PATH=$(command -v checkpoint)
-    pass "checkpoint found at $CP_PATH"
+echo "[5/5] agent-aspect binary in PATH..."
+if command -v agent-aspect &>/dev/null; then
+    CP_PATH=$(command -v agent-aspect)
+    pass "agent-aspect found at $CP_PATH"
 else
-    echo "  SKIP: checkpoint not in PATH (ok for CI, needed for runtime)"
+    echo "  SKIP: agent-aspect not in PATH (ok for CI, needed for runtime)"
 fi
 
 echo ""

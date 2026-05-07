@@ -26,7 +26,7 @@ struct BridgeStateFile {
     exe: String,
 }
 
-/// Parse the raw stdout of `checkpoint bridge status` into a BridgeStatus.
+/// Parse the raw stdout of `agent-aspect bridge status` into a BridgeStatus.
 pub fn parse_status(raw: &str) -> BridgeStatus {
     let mut map = std::collections::HashMap::new();
     for line in raw.lines() {
@@ -90,20 +90,20 @@ pub fn parse_status(raw: &str) -> BridgeStatus {
     }
 }
 
-/// Run `checkpoint bridge status` and return parsed status.
+/// Run `agent-aspect bridge status` and return parsed status.
 pub fn status(resource_dir: Option<&PathBuf>) -> BridgeStatus {
     let raw = run_bridge_cmd(resource_dir, &["status"]);
     parse_status(&raw)
 }
 
-/// Run `checkpoint bridge start`, wait 2s, then return new status.
+/// Run `agent-aspect bridge start`, wait 2s, then return new status.
 pub fn start(resource_dir: Option<&PathBuf>) -> BridgeStatus {
     run_bridge_cmd(resource_dir, &["start"]);
     std::thread::sleep(Duration::from_secs(2));
     status(resource_dir)
 }
 
-/// Run `checkpoint bridge stop`.
+/// Run `agent-aspect bridge stop`.
 pub fn stop(resource_dir: Option<&PathBuf>) -> String {
     run_bridge_cmd(resource_dir, &["stop"])
 }

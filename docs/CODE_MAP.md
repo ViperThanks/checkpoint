@@ -172,7 +172,7 @@ SwiftPM macOS 13.0 app。SwiftUI + WKWebView 包裹现有 Bridge Web UI。
 | `Models/AppRoute.swift` | 路由枚举：.loading / .web / .diagnostics |
 | `Models/BridgeStatusModel.swift` | 解析 `agent-aspect bridge status` 输出为结构化 model |
 | `Models/WebViewState.swift` | WebView 加载状态：.idle / .loading / .loaded / .failed |
-| `Services/AgentAspectPaths.swift` | 集中路径解析（`~/.agent-aspect/` 优先，`~/.checkpoint/` fallback） |
+| `Services/AgentAspectPaths.swift` | 集中路径解析（`~/.agent-aspect/` 优先，`~/.agent-aspect/` fallback） |
 | `Services/BinaryLocator.swift` | 3 层 binary 搜索：bundle → env → PATH |
 | `Services/BridgeSupervisor.swift` | Bridge 生命周期：status / start(async) / stop / health / readPort |
 | `Services/CommandRunner.swift` | 非交互命令执行 + 10s timeout + pipe deadlock 防护 |

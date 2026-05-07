@@ -1,9 +1,9 @@
 //! 配置管理 — TOML 配置的加载、保存和默认值。
 //!
-//! 配置文件位于 `~/.agent-aspect/config.toml`（旧安装可能沿用 `~/.checkpoint/`）。
+//! 配置文件位于 `~/.agent-aspect/config.toml`（旧安装可能沿用 `~/.agent-aspect/`）。
 //! 所有字段都有 serde default，保证向后兼容新增字段。
 
-use crate::error::CheckpointResult;
+use crate::error::AgentAspectResult;
 use crate::paths;
 use crate::provider_registry::ProviderConfigOverride;
 use crate::rule::Mode;
@@ -148,22 +148,22 @@ impl Config {
         paths::config_path()
     }
 
-    /// 从 TOML 文件加载配置。文件不存在或格式错误时返回 CheckpointError。
-    pub fn load(path: &Path) -> CheckpointResult<Self> {
+    /// 从 TOML 文件加载配置。文件不存在或格式错误时返回 AgentAspectError。
+    pub fn load(path: &Path) -> AgentAspectResult<Self> {
         let content =
-            std::fs::read_to_string(path).map_err(crate::error::CheckpointError::ReadConfig)?;
-        toml::from_str(&content).map_err(crate::error::CheckpointError::ParseConfig)
+            std::fs::read_to_string(path).map_err(crate::error::AgentAspectError::ReadConfig)?;
+        toml::from_str(&content).map_err(crate::error::AgentAspectError::ParseConfig)
     }
 
     /// 将配置序列化为 TOML 并写入文件，自动创建父目录。
-    pub fn save(&self, path: &Path) -> CheckpointResult<()> {
+    pub fn save(&self, path: &Path) -> AgentAspectResult<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(crate::error::CheckpointError::CreateConfigDir)?;
+                .map_err(crate::error::AgentAspectError::CreateConfigDir)?;
         }
-        let content =
-            toml::to_string_pretty(self).map_err(crate::error::CheckpointError::SerializeConfig)?;
-        std::fs::write(path, content).map_err(crate::error::CheckpointError::WriteConfig)?;
+        let content = toml::to_string_pretty(self)
+            .map_err(crate::error::AgentAspectError::SerializeConfig)?;
+        std::fs::write(path, content).map_err(crate::error::AgentAspectError::WriteConfig)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -178,12 +178,12 @@ impl Config {
         if path.exists() {
             match Self::load(&path) {
                 Ok(c) => return c,
-                Err(e) => eprintln!("checkpoint: config load error: {e}, using defaults"),
+                Err(e) => eprintln!("agent-aspect: config load error: {e}, using defaults"),
             }
         }
         let cfg = Self::default_config();
         if let Err(e) = cfg.save(&path) {
-            eprintln!("checkpoint: config save error: {e}");
+            eprintln!("agent-aspect: config save error: {e}");
         }
         cfg
     }

@@ -14,10 +14,10 @@
 //! - Metadata 请求（SessionStart/UserPromptSubmit）不输出 hook 响应。
 //! - 交互模式通过 /dev/tty 读取用户输入，不占用 stdin（stdin 被 hook payload 使用）。
 
-use checkpoint_core::decision::Action;
-use checkpoint_core::event::AgentId;
-use checkpoint_core::paths;
-use checkpoint_core::wire::{HookResponse, WireRequest, WireResponse};
+use agent_aspect_core::decision::Action;
+use agent_aspect_core::event::AgentId;
+use agent_aspect_core::paths;
+use agent_aspect_core::wire::{HookResponse, WireRequest, WireResponse};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -38,8 +38,8 @@ fn main() {
         Err(e) => {
             eprintln!("agent-aspect-hook: daemon not reachable: {e}");
             let mode = resolve_mode();
-            if mode == checkpoint_core::rule::Mode::Observer
-                || mode == checkpoint_core::rule::Mode::Autonomous
+            if mode == agent_aspect_core::rule::Mode::Observer
+                || mode == agent_aspect_core::rule::Mode::Autonomous
             {
                 // Observer/Autonomous 模式下 daemon 不可达 -> 放行
                 return;
@@ -128,22 +128,21 @@ fn main() {
 }
 
 /// 读取当前 mode 配置。daemon 不可达时的 fail-closed 决策依赖此函数。
-fn resolve_mode() -> checkpoint_core::rule::Mode {
-    let config_path = checkpoint_core::config::Config::config_path();
+fn resolve_mode() -> agent_aspect_core::rule::Mode {
+    let config_path = agent_aspect_core::config::Config::config_path();
     if config_path.exists() {
-        if let Ok(c) = checkpoint_core::config::Config::load(&config_path) {
+        if let Ok(c) = agent_aspect_core::config::Config::load(&config_path) {
             return c.mode;
         }
     }
     // 环境变量覆盖
-    if let Some(raw) = checkpoint_core::env_compat::env_var("AGENT_ASPECT_MODE", "CHECKPOINT_MODE")
-    {
-        if let Ok(m) = raw.parse::<checkpoint_core::rule::Mode>() {
+    if let Some(raw) = agent_aspect_core::env_compat::env_var("AGENT_ASPECT_MODE") {
+        if let Ok(m) = raw.parse::<agent_aspect_core::rule::Mode>() {
             return m;
         }
     }
     // 默认 Guard（最安全的默认值）
-    checkpoint_core::rule::Mode::Guard
+    agent_aspect_core::rule::Mode::Guard
 }
 
 /// 从 payload 中提取 hook_event_name 字段。
@@ -161,7 +160,7 @@ fn extract_hook_event(payload: &str) -> String {
 /// 检测当前请求来自哪个 AI agent。
 ///
 /// 检测优先级：
-/// 1. `CHECKPOINT_AGENT` 环境变量（显式指定）
+/// 1. `AGENT_ASPECT_AGENT` 环境变量（显式指定）
 /// 2. Payload 启发式：tool_name / tool_input 字段模式匹配
 ///
 /// 只返回有对应 normalize 路径的 agent（Claude/Codex/Kimi）。
@@ -176,9 +175,7 @@ fn detect_agent(payload: &str) -> AgentId {
     };
 
     // 1. 显式环境变量（只接受已支持的 agent）
-    if let Some(val) =
-        checkpoint_core::env_compat::env_var("AGENT_ASPECT_AGENT", "CHECKPOINT_AGENT")
-    {
+    if let Some(val) = agent_aspect_core::env_compat::env_var("AGENT_ASPECT_AGENT") {
         if let Ok(agent) = AgentId::from_str(&val) {
             if supported(agent) {
                 return agent;
@@ -330,12 +327,9 @@ fn send_override(
 
 /// 从 /dev/tty 读取用户确认（y/yes），绕过已被 hook payload 占用的 stdin。
 ///
-/// 非 TTY 环境或 CHECKPOINT_ASSUME_NO_TTY 设置时默认返回 false。
+/// 非 TTY 环境或 AGENT_ASPECT_ASSUME_NO_TTY 设置时默认返回 false。
 fn read_yes_tty() -> bool {
-    if checkpoint_core::env_compat::env_var_is_set(
-        "AGENT_ASPECT_ASSUME_NO_TTY",
-        "CHECKPOINT_ASSUME_NO_TTY",
-    ) {
+    if agent_aspect_core::env_compat::env_var_is_set("AGENT_ASPECT_ASSUME_NO_TTY") {
         return false;
     }
 

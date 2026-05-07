@@ -32,7 +32,7 @@ struct PatternKey {
 /// 5. Skip patterns that already have a suggestion in the DB
 pub fn generate_suggestions(
     store: &AuditStore,
-) -> crate::error::CheckpointResult<Vec<SuggestionRow>> {
+) -> crate::error::AgentAspectResult<Vec<SuggestionRow>> {
     // Skip regeneration if no new decisions since last generation
     if let Ok(Some(last_gen)) = store.latest_suggestion_created_at() {
         if let Ok(0) = store.decision_count_since(&last_gen) {

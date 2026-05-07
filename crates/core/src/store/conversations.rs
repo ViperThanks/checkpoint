@@ -1,7 +1,7 @@
 //! 会话 DAO — 会话的 CRUD、标题优先级管理、统计缓存。
 
 use crate::audit::AuditStore;
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 
 /// 事件关联的会话摘要信息（用于 API 响应）。
 #[derive(Debug, Clone)]
@@ -120,7 +120,7 @@ impl AuditStore {
         started_at: &str,
         last_seen_at: &str,
         transcript_path: Option<&str>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "INSERT INTO conversations (id, agent, conversation_id, title, title_source, project_path, started_at, last_seen_at, transcript_path)
@@ -140,7 +140,7 @@ impl AuditStore {
                      transcript_path = COALESCE(excluded.transcript_path, conversations.transcript_path)",
                 rusqlite::params![id, agent, conversation_id, title, project_path, started_at, last_seen_at, transcript_path],
             )
-            .map_err(CheckpointError::InsertConversation)?;
+            .map_err(AgentAspectError::InsertConversation)?;
         Ok(())
     }
 
@@ -152,7 +152,7 @@ impl AuditStore {
         ask_delta: i64,
         deny_delta: i64,
         job_delta: i64,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE conversations SET
@@ -163,12 +163,12 @@ impl AuditStore {
                  WHERE id = ?5",
                 rusqlite::params![event_delta, ask_delta, deny_delta, job_delta, id],
             )
-            .map_err(CheckpointError::UpdateConversation)?;
+            .map_err(AgentAspectError::UpdateConversation)?;
         Ok(())
     }
 
     /// 更新 last_seen_at，但只向前推进（不会回退）。
-    pub fn touch_conversation(&self, id: &str, timestamp: &str) -> CheckpointResult<()> {
+    pub fn touch_conversation(&self, id: &str, timestamp: &str) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE conversations
@@ -180,7 +180,7 @@ impl AuditStore {
                  WHERE id = ?2",
                 rusqlite::params![timestamp, id],
             )
-            .map_err(CheckpointError::UpdateConversation)?;
+            .map_err(AgentAspectError::UpdateConversation)?;
         Ok(())
     }
 
@@ -190,7 +190,7 @@ impl AuditStore {
         agent: &str,
         conversation_id: &str,
         timestamp: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         let id = crate::conversation::conversation_db_id(agent, conversation_id);
         self.touch_conversation(&id, timestamp)
     }
@@ -201,14 +201,14 @@ impl AuditStore {
         id: &str,
         token_count: i64,
         file_size_bytes: i64,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE conversations SET cached_token_count = ?1, cached_file_size_bytes = ?2,
                         stats_computed_at = datetime('now') WHERE id = ?3",
                 rusqlite::params![token_count, file_size_bytes, id],
             )
-            .map_err(CheckpointError::UpdateConvStats)?;
+            .map_err(AgentAspectError::UpdateConvStats)?;
         Ok(())
     }
 
@@ -226,7 +226,7 @@ impl AuditStore {
         transcript_path: Option<&str>,
         title: Option<&str>,
         title_source: Option<&str>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         let current_source: Option<String> = self
             .conn
             .query_row(
@@ -246,7 +246,7 @@ impl AuditStore {
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8)",
                         rusqlite::params![id, agent, conversation_id, t, ts, project_path, timestamp, transcript_path],
                     )
-                    .map_err(CheckpointError::InsertConversation)?;
+                    .map_err(AgentAspectError::InsertConversation)?;
             }
             Some(src) => {
                 let should_upgrade = match (title_source, src.as_str()) {
@@ -276,7 +276,7 @@ impl AuditStore {
                                     id
                                 ],
                             )
-                            .map_err(CheckpointError::UpdateConversation)?;
+                            .map_err(AgentAspectError::UpdateConversation)?;
                     }
                 } else {
                     self.conn
@@ -288,7 +288,7 @@ impl AuditStore {
                              WHERE id = ?4",
                             rusqlite::params![timestamp, project_path, transcript_path, id],
                         )
-                        .map_err(CheckpointError::UpdateConversation)?;
+                        .map_err(AgentAspectError::UpdateConversation)?;
                 }
             }
         }
@@ -301,7 +301,7 @@ impl AuditStore {
         limit: usize,
         offset: usize,
         agent_filter: Option<&str>,
-    ) -> CheckpointResult<Vec<ConversationRow>> {
+    ) -> AgentAspectResult<Vec<ConversationRow>> {
         let mut sql = format!("SELECT {} FROM conversations", Self::CONV_COLUMNS);
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         if let Some(a) = agent_filter {
@@ -318,16 +318,16 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::QueryConversation)?;
+            .map_err(AgentAspectError::QueryConversation)?;
         let rows = stmt
             .query_map(param_refs.as_slice(), Self::map_conversation_row)
-            .map_err(CheckpointError::QueryConversation)?;
+            .map_err(AgentAspectError::QueryConversation)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryConversation)
+            .map_err(AgentAspectError::QueryConversation)
     }
 
     /// 按 DB id 获取单个会话。
-    pub fn get_conversation(&self, id: &str) -> CheckpointResult<Option<ConversationRow>> {
+    pub fn get_conversation(&self, id: &str) -> AgentAspectResult<Option<ConversationRow>> {
         self.conn
             .query_row(
                 &format!(
@@ -340,7 +340,7 @@ impl AuditStore {
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                _ => Err(CheckpointError::QueryConversation(e)),
+                _ => Err(AgentAspectError::QueryConversation(e)),
             })
     }
 
@@ -349,7 +349,7 @@ impl AuditStore {
     pub fn current_conversation_decision_counts(
         &self,
         conversation_db_id: &str,
-    ) -> CheckpointResult<(i64, i64)> {
+    ) -> AgentAspectResult<(i64, i64)> {
         self.conn
             .query_row(
                 "SELECT
@@ -363,7 +363,7 @@ impl AuditStore {
                 rusqlite::params![conversation_db_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .map_err(CheckpointError::QueryConversation)
+            .map_err(AgentAspectError::QueryConversation)
     }
 
     /// 批量查询多个会话的 (ask_count, deny_count)。
@@ -372,7 +372,7 @@ impl AuditStore {
     pub fn batch_conversation_decision_counts(
         &self,
         ids: &[&str],
-    ) -> CheckpointResult<std::collections::HashMap<String, (i64, i64)>> {
+    ) -> AgentAspectResult<std::collections::HashMap<String, (i64, i64)>> {
         use std::collections::HashMap;
         if ids.is_empty() {
             return Ok(HashMap::new());
@@ -403,7 +403,7 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::QueryConversation)?;
+            .map_err(AgentAspectError::QueryConversation)?;
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
                 Ok((
@@ -412,10 +412,10 @@ impl AuditStore {
                     row.get::<_, i64>(2)?,
                 ))
             })
-            .map_err(CheckpointError::QueryConversation)?;
+            .map_err(AgentAspectError::QueryConversation)?;
         let mut map = HashMap::new();
         for row in rows {
-            let (id, ask, deny) = row.map_err(CheckpointError::QueryConversation)?;
+            let (id, ask, deny) = row.map_err(AgentAspectError::QueryConversation)?;
             map.insert(id, (ask, deny));
         }
         Ok(map)
@@ -426,7 +426,7 @@ impl AuditStore {
         conversation_db_id: &str,
         limit: usize,
         offset: usize,
-    ) -> CheckpointResult<Vec<crate::store::decisions::DecisionRow>> {
+    ) -> AgentAspectResult<Vec<crate::store::decisions::DecisionRow>> {
         let sql = format!(
             "SELECT {} FROM decisions d
              LEFT JOIN events e ON d.event_id = e.id
@@ -440,18 +440,18 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
         let rows = stmt
             .query_map(
                 rusqlite::params![conversation_db_id, limit as i64, offset as i64],
                 Self::map_decision_row,
             )
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::CollectDecisions)
+            .map_err(AgentAspectError::CollectDecisions)
     }
 
-    pub fn count_conversation_events(&self, conversation_db_id: &str) -> CheckpointResult<usize> {
+    pub fn count_conversation_events(&self, conversation_db_id: &str) -> AgentAspectResult<usize> {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM decisions d
@@ -461,10 +461,10 @@ impl AuditStore {
                 rusqlite::params![conversation_db_id],
                 |row| row.get::<_, usize>(0),
             )
-            .map_err(CheckpointError::QueryFilteredDecisions)
+            .map_err(AgentAspectError::QueryFilteredDecisions)
     }
 
-    pub fn count_conversations(&self, agent_filter: Option<&str>) -> CheckpointResult<usize> {
+    pub fn count_conversations(&self, agent_filter: Option<&str>) -> AgentAspectResult<usize> {
         let mut sql = String::from("SELECT COUNT(*) FROM conversations");
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         if let Some(a) = agent_filter {
@@ -475,18 +475,18 @@ impl AuditStore {
             params.iter().map(|p| p.as_ref()).collect();
         self.conn
             .query_row(&sql, param_refs.as_slice(), |row| row.get::<_, usize>(0))
-            .map_err(CheckpointError::QueryConversation)
+            .map_err(AgentAspectError::QueryConversation)
     }
 
     /// 回填：为 conversation_id 为 NULL 的旧事件重建会话记录，
     /// 并刷新所有会话的 event_count / ask_count / deny_count。
-    pub fn backfill_conversations(&self) -> CheckpointResult<usize> {
+    pub fn backfill_conversations(&self) -> AgentAspectResult<usize> {
         use crate::conversation;
 
         let mut stmt = self
             .conn
             .prepare("SELECT id, agent, timestamp, raw_payload FROM events WHERE conversation_id IS NULL ORDER BY timestamp ASC")
-            .map_err(CheckpointError::BackfillConversations)?;
+            .map_err(AgentAspectError::BackfillConversations)?;
         let rows = stmt
             .query_map([], |row| {
                 Ok((
@@ -496,12 +496,12 @@ impl AuditStore {
                     row.get::<_, String>(3)?,
                 ))
             })
-            .map_err(CheckpointError::BackfillConversations)?;
+            .map_err(AgentAspectError::BackfillConversations)?;
 
         let mut count = 0usize;
         for row in rows {
             let (event_id, agent, timestamp, raw_payload) =
-                row.map_err(CheckpointError::BackfillConversations)?;
+                row.map_err(AgentAspectError::BackfillConversations)?;
             if let Some(cid) = conversation::extract_conversation_id(&agent, &raw_payload) {
                 let db_id = conversation::conversation_db_id(&agent, &cid);
                 let project_path = conversation::extract_project_path(&agent, &raw_payload);
@@ -516,7 +516,7 @@ impl AuditStore {
                         "UPDATE events SET conversation_id = ?1, project_path = ?2 WHERE id = ?3",
                         rusqlite::params![cid, project_path.as_ref(), event_id],
                     )
-                    .map_err(CheckpointError::BackfillConversations)?;
+                    .map_err(AgentAspectError::BackfillConversations)?;
 
                 self.upsert_conversation(
                     &db_id,
@@ -540,7 +540,7 @@ impl AuditStore {
                     deny_count = (SELECT COUNT(*) FROM decisions d JOIN events e ON d.event_id = e.id WHERE e.conversation_id = conversations.conversation_id AND e.agent = conversations.agent AND d.action = 'deny')",
                 [],
             )
-            .map_err(CheckpointError::BackfillConversations)?;
+            .map_err(AgentAspectError::BackfillConversations)?;
 
         Ok(count)
     }
@@ -548,7 +548,7 @@ impl AuditStore {
     pub fn get_conversation_all_events(
         &self,
         conversation_db_id: &str,
-    ) -> CheckpointResult<Vec<crate::store::events::EventRow>> {
+    ) -> AgentAspectResult<Vec<crate::store::events::EventRow>> {
         let sql = "SELECT e.id, e.phase, e.type, e.agent, e.tool_name, e.file_path, e.timestamp, e.raw_payload
                    FROM events e
                    JOIN conversations c ON c.conversation_id = e.conversation_id AND c.agent = e.agent
@@ -557,7 +557,7 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(sql)
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
         let rows = stmt
             .query_map(rusqlite::params![conversation_db_id], |row| {
                 Ok(crate::store::events::EventRow {
@@ -571,9 +571,9 @@ impl AuditStore {
                     raw_payload: row.get(7)?,
                 })
             })
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::CollectDecisions)
+            .map_err(AgentAspectError::CollectDecisions)
     }
 
     pub fn get_conversation_raw_events(
@@ -581,7 +581,7 @@ impl AuditStore {
         conversation_db_id: &str,
         limit: usize,
         offset: usize,
-    ) -> CheckpointResult<Vec<crate::store::events::EventRow>> {
+    ) -> AgentAspectResult<Vec<crate::store::events::EventRow>> {
         let sql = "SELECT e.id, e.phase, e.type, e.agent, e.tool_name, e.file_path, e.timestamp, e.raw_payload
                    FROM events e
                    JOIN conversations c ON c.conversation_id = e.conversation_id AND c.agent = e.agent
@@ -591,7 +591,7 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(sql)
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
         let rows = stmt
             .query_map(
                 rusqlite::params![conversation_db_id, limit as i64, offset as i64],
@@ -608,15 +608,15 @@ impl AuditStore {
                     })
                 },
             )
-            .map_err(CheckpointError::QueryFilteredDecisions)?;
+            .map_err(AgentAspectError::QueryFilteredDecisions)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::CollectDecisions)
+            .map_err(AgentAspectError::CollectDecisions)
     }
 
     pub fn count_conversation_raw_events(
         &self,
         conversation_db_id: &str,
-    ) -> CheckpointResult<usize> {
+    ) -> AgentAspectResult<usize> {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM events e
@@ -625,7 +625,7 @@ impl AuditStore {
                 rusqlite::params![conversation_db_id],
                 |row| row.get::<_, usize>(0),
             )
-            .map_err(CheckpointError::QueryFilteredDecisions)
+            .map_err(AgentAspectError::QueryFilteredDecisions)
     }
 
     /// 强制更新会话标题和来源（不检查优先级）。
@@ -634,13 +634,13 @@ impl AuditStore {
         id: &str,
         title: &str,
         title_source: &str,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE conversations SET title = ?1, title_source = ?2 WHERE id = ?3",
                 rusqlite::params![title, title_source, id],
             )
-            .map_err(CheckpointError::UpdateConversationTitle)?;
+            .map_err(AgentAspectError::UpdateConversationTitle)?;
         Ok(())
     }
 
@@ -648,7 +648,7 @@ impl AuditStore {
     pub fn list_conversations_for_title_import(
         &self,
         limit: usize,
-    ) -> CheckpointResult<Vec<ConversationRow>> {
+    ) -> AgentAspectResult<Vec<ConversationRow>> {
         let sql = format!(
             "SELECT {} FROM conversations WHERE title_source = 'fallback' ORDER BY last_seen_at DESC LIMIT ?1",
             Self::CONV_COLUMNS
@@ -656,19 +656,19 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::QueryConversation)?;
+            .map_err(AgentAspectError::QueryConversation)?;
         let rows = stmt
             .query_map(rusqlite::params![limit], Self::map_conversation_row)
-            .map_err(CheckpointError::QueryConversation)?;
+            .map_err(AgentAspectError::QueryConversation)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryConversation)
+            .map_err(AgentAspectError::QueryConversation)
     }
 
     /// 返回 stats 未缓存的会话（cached_token_count 为 NULL），供后台 warming。
     pub fn list_conversations_for_stats_warming(
         &self,
         limit: usize,
-    ) -> CheckpointResult<Vec<ConversationRow>> {
+    ) -> AgentAspectResult<Vec<ConversationRow>> {
         let sql = format!(
             "SELECT {} FROM conversations WHERE cached_token_count IS NULL ORDER BY last_seen_at DESC LIMIT ?1",
             Self::CONV_COLUMNS
@@ -676,16 +676,16 @@ impl AuditStore {
         let mut stmt = self
             .conn
             .prepare(&sql)
-            .map_err(CheckpointError::QueryConversation)?;
+            .map_err(AgentAspectError::QueryConversation)?;
         let rows = stmt
             .query_map(rusqlite::params![limit], Self::map_conversation_row)
-            .map_err(CheckpointError::QueryConversation)?;
+            .map_err(AgentAspectError::QueryConversation)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::QueryConversation)
+            .map_err(AgentAspectError::QueryConversation)
     }
 
     /// 获取运行上下文：所有项目聚合 + 最近 10 条会话，供 dashboard 首页。
-    pub fn get_run_context(&self) -> CheckpointResult<RunContext> {
+    pub fn get_run_context(&self) -> AgentAspectResult<RunContext> {
         let mut stmt = self
             .conn
             .prepare(
@@ -695,7 +695,7 @@ impl AuditStore {
              GROUP BY project_path \
              ORDER BY project_path",
             )
-            .map_err(CheckpointError::QueryConversation)?;
+            .map_err(AgentAspectError::QueryConversation)?;
         let projects = stmt
             .query_map([], |row| {
                 let path: String = row.get(0)?;
@@ -707,7 +707,7 @@ impl AuditStore {
                     conversation_count: count as usize,
                 })
             })
-            .map_err(CheckpointError::QueryConversation)?
+            .map_err(AgentAspectError::QueryConversation)?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -720,7 +720,7 @@ impl AuditStore {
     }
 
     /// 检查项目路径是否曾在会话中被观察到（用于 relay 设备验证）。
-    pub fn is_known_project_path(&self, project_path: &str) -> CheckpointResult<bool> {
+    pub fn is_known_project_path(&self, project_path: &str) -> AgentAspectResult<bool> {
         self.conn
             .query_row(
                 "SELECT 1 FROM conversations WHERE project_path = ?1 LIMIT 1",
@@ -730,7 +730,7 @@ impl AuditStore {
             .map(|_| true)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(false),
-                _ => Err(CheckpointError::QueryConversation(e)),
+                _ => Err(AgentAspectError::QueryConversation(e)),
             })
     }
 
@@ -745,7 +745,7 @@ impl AuditStore {
         permission_mode: &str,
         entrypoint: Option<&str>,
         toolchain_fingerprint: Option<&str>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE conversations SET
@@ -764,7 +764,7 @@ impl AuditStore {
                     id
                 ],
             )
-            .map_err(CheckpointError::UpdateRuntimeIdentity)?;
+            .map_err(AgentAspectError::UpdateRuntimeIdentity)?;
         Ok(())
     }
 
@@ -774,7 +774,7 @@ impl AuditStore {
         id: &str,
         permission_mode: &str,
         entrypoint: Option<&str>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE conversations SET
@@ -785,7 +785,7 @@ impl AuditStore {
                  WHERE id = ?3",
                 rusqlite::params![permission_mode, entrypoint, id],
             )
-            .map_err(CheckpointError::UpdateRuntimeIdentity)?;
+            .map_err(AgentAspectError::UpdateRuntimeIdentity)?;
         Ok(())
     }
 
@@ -798,7 +798,7 @@ impl AuditStore {
         id: &str,
         permission_mode: &str,
         entrypoint: Option<&str>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE conversations
@@ -810,7 +810,7 @@ impl AuditStore {
                    AND permission_mode = 'unknown'",
                 rusqlite::params![permission_mode, entrypoint, id],
             )
-            .map_err(CheckpointError::UpdateRuntimeIdentity)?;
+            .map_err(AgentAspectError::UpdateRuntimeIdentity)?;
         Ok(())
     }
 
@@ -820,7 +820,7 @@ impl AuditStore {
         id: &str,
         warning: Option<&str>,
         resume_cost_mode: Option<&str>,
-    ) -> CheckpointResult<()> {
+    ) -> AgentAspectResult<()> {
         self.conn
             .execute(
                 "UPDATE conversations SET
@@ -829,7 +829,7 @@ impl AuditStore {
                  WHERE id = ?3",
                 rusqlite::params![warning, resume_cost_mode, id],
             )
-            .map_err(CheckpointError::UpdateRuntimeIdentity)?;
+            .map_err(AgentAspectError::UpdateRuntimeIdentity)?;
         Ok(())
     }
 }

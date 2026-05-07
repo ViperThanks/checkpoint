@@ -10,11 +10,11 @@
 //! - busy_timeout=5000ms 防止 SQLITE_BUSY 即时失败
 //! - decisions 表允许同一 event_id 多行（覆盖场景）
 
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 use rusqlite::Connection;
 use std::path::Path;
 
-// Re-export row types so external code can keep using `use checkpoint_core::audit::*`.
+// Re-export row types so external code can keep using `use agent_aspect_core::audit::*`.
 pub use crate::store::conversations::{
     ConversationInfo, ConversationRow, ProjectContext, RunContext,
 };
@@ -35,27 +35,27 @@ pub struct AuditStore {
 
 impl AuditStore {
     /// 打开磁盘数据库并启用 WAL + busy_timeout，然后执行 schema 初始化和迁移。
-    pub fn open(path: &Path) -> CheckpointResult<Self> {
-        let conn = Connection::open(path).map_err(CheckpointError::OpenDb)?;
+    pub fn open(path: &Path) -> AgentAspectResult<Self> {
+        let conn = Connection::open(path).map_err(AgentAspectError::OpenDb)?;
         // WAL 模式允许写期间并发读（job runner 写日志时 HTTP handler 可读）。
         // busy_timeout 防止 SQLITE_BUSY 即时失败。
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
-            .map_err(CheckpointError::InitTables)?;
+            .map_err(AgentAspectError::InitTables)?;
         let store = Self { conn };
         store.init_tables()?;
         Ok(store)
     }
 
     /// 打开内存数据库（测试用）。
-    pub fn open_in_memory() -> CheckpointResult<Self> {
-        let conn = Connection::open_in_memory().map_err(CheckpointError::OpenInMemoryDb)?;
+    pub fn open_in_memory() -> AgentAspectResult<Self> {
+        let conn = Connection::open_in_memory().map_err(AgentAspectError::OpenInMemoryDb)?;
         let store = Self { conn };
         store.init_tables()?;
         Ok(store)
     }
 
     /// 建表 + 索引 + 执行所有迁移。幂等，已存在的表/索引自动跳过。
-    fn init_tables(&self) -> CheckpointResult<()> {
+    fn init_tables(&self) -> AgentAspectResult<()> {
         self.conn
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS events (
@@ -215,7 +215,7 @@ impl AuditStore {
                 CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id, step_order);
                 CREATE INDEX IF NOT EXISTS idx_workflow_steps_job ON workflow_steps(job_id);",
             )
-            .map_err(CheckpointError::InitTables)?;
+            .map_err(AgentAspectError::InitTables)?;
         self.migrate_legacy_decisions_schema()?;
         self.migrate_v2_conversations()?;
         self.migrate_v3_title_import()?;
@@ -238,12 +238,12 @@ impl AuditStore {
                 "CREATE INDEX IF NOT EXISTS idx_events_conv_agent ON events(conversation_id, agent)",
                 [],
             )
-            .map_err(CheckpointError::InitTables)?;
+            .map_err(AgentAspectError::InitTables)?;
         Ok(())
     }
 
     /// 检查表中是否存在指定列（用于安全迁移，避免 ALTER 重复列）。
-    fn column_exists(&self, table: &str, column: &str) -> CheckpointResult<bool> {
+    fn column_exists(&self, table: &str, column: &str) -> AgentAspectResult<bool> {
         let sql = format!(
             "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name = ?1",
             table
@@ -251,21 +251,21 @@ impl AuditStore {
         let count: i64 = self
             .conn
             .query_row(&sql, rusqlite::params![column], |row| row.get(0))
-            .map_err(CheckpointError::MigrateConversationSchema)?;
+            .map_err(AgentAspectError::MigrateConversationSchema)?;
         Ok(count > 0)
     }
 
     /// v2: events 表新增 conversation_id / project_path 列，jobs 新增 conversation_id。
-    fn migrate_v2_conversations(&self) -> CheckpointResult<()> {
+    fn migrate_v2_conversations(&self) -> AgentAspectResult<()> {
         if !self.column_exists("events", "conversation_id")? {
             self.conn
                 .execute("ALTER TABLE events ADD COLUMN conversation_id TEXT", [])
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         if !self.column_exists("events", "project_path")? {
             self.conn
                 .execute("ALTER TABLE events ADD COLUMN project_path TEXT", [])
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         if self.column_exists("events", "conversation_id")? {
             self.conn
@@ -273,22 +273,22 @@ impl AuditStore {
                     "CREATE INDEX IF NOT EXISTS idx_events_conversation ON events(conversation_id)",
                     [],
                 )
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         if !self.column_exists("jobs", "conversation_id")? {
             self.conn
                 .execute("ALTER TABLE jobs ADD COLUMN conversation_id TEXT", [])
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         Ok(())
     }
 
     /// v3: conversations 表新增 title_source / transcript_path 列。
-    fn migrate_v3_title_import(&self) -> CheckpointResult<()> {
+    fn migrate_v3_title_import(&self) -> AgentAspectResult<()> {
         if !self.column_exists("conversations", "title_source")? {
             self.conn
                 .execute("ALTER TABLE conversations ADD COLUMN title_source TEXT NOT NULL DEFAULT 'fallback'", [])
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         if !self.column_exists("conversations", "transcript_path")? {
             self.conn
@@ -296,40 +296,40 @@ impl AuditStore {
                     "ALTER TABLE conversations ADD COLUMN transcript_path TEXT",
                     [],
                 )
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         Ok(())
     }
 
     /// v4: jobs 表新增 provider / project_path / prompt 列。
-    fn migrate_v4_job_context(&self) -> CheckpointResult<()> {
+    fn migrate_v4_job_context(&self) -> AgentAspectResult<()> {
         if !self.column_exists("jobs", "provider")? {
             self.conn
                 .execute("ALTER TABLE jobs ADD COLUMN provider TEXT", [])
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         if !self.column_exists("jobs", "project_path")? {
             self.conn
                 .execute("ALTER TABLE jobs ADD COLUMN project_path TEXT", [])
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         if !self.column_exists("jobs", "prompt")? {
             self.conn
                 .execute("ALTER TABLE jobs ADD COLUMN prompt TEXT", [])
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         Ok(())
     }
 
     /// v5: conversations 表新增 token_count / file_size_bytes 列。
-    fn migrate_v5_conv_stats(&self) -> CheckpointResult<()> {
+    fn migrate_v5_conv_stats(&self) -> AgentAspectResult<()> {
         if !self.column_exists("conversations", "token_count")? {
             self.conn
                 .execute(
                     "ALTER TABLE conversations ADD COLUMN token_count INTEGER NOT NULL DEFAULT 0",
                     [],
                 )
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         if !self.column_exists("conversations", "file_size_bytes")? {
             self.conn
@@ -337,13 +337,13 @@ impl AuditStore {
                     "ALTER TABLE conversations ADD COLUMN file_size_bytes INTEGER NOT NULL DEFAULT 0",
                     [],
                 )
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         Ok(())
     }
 
     /// v6: jobs 表新增进程监控字段（pid / runner_id / heartbeat 等）。
-    fn migrate_v6_job_supervisor(&self) -> CheckpointResult<()> {
+    fn migrate_v6_job_supervisor(&self) -> AgentAspectResult<()> {
         let columns = [
             ("pid", "INTEGER"),
             ("process_group_id", "INTEGER"),
@@ -357,7 +357,7 @@ impl AuditStore {
             if !self.column_exists("jobs", name)? {
                 self.conn
                     .execute(&format!("ALTER TABLE jobs ADD COLUMN {name} {ty}"), [])
-                    .map_err(CheckpointError::MigrateConversationSchema)?;
+                    .map_err(AgentAspectError::MigrateConversationSchema)?;
             }
         }
         self.conn
@@ -365,19 +365,19 @@ impl AuditStore {
                 "CREATE INDEX IF NOT EXISTS idx_jobs_runner_status ON jobs(runner_id, status)",
                 [],
             )
-            .map_err(CheckpointError::MigrateConversationSchema)?;
+            .map_err(AgentAspectError::MigrateConversationSchema)?;
         Ok(())
     }
 
     /// v8: conversations 表新增缓存统计字段（cached_token_count 等）。
-    fn migrate_v8_conv_stats_cache(&self) -> CheckpointResult<()> {
+    fn migrate_v8_conv_stats_cache(&self) -> AgentAspectResult<()> {
         if !self.column_exists("conversations", "cached_token_count")? {
             self.conn
                 .execute(
                     "ALTER TABLE conversations ADD COLUMN cached_token_count INTEGER",
                     [],
                 )
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         if !self.column_exists("conversations", "cached_file_size_bytes")? {
             self.conn
@@ -385,7 +385,7 @@ impl AuditStore {
                     "ALTER TABLE conversations ADD COLUMN cached_file_size_bytes INTEGER",
                     [],
                 )
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         if !self.column_exists("conversations", "stats_computed_at")? {
             self.conn
@@ -393,13 +393,13 @@ impl AuditStore {
                     "ALTER TABLE conversations ADD COLUMN stats_computed_at TEXT",
                     [],
                 )
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         Ok(())
     }
 
     /// v9: 新增 devices 表；decisions 表新增 device_id 列。
-    fn migrate_v9_devices(&self) -> CheckpointResult<()> {
+    fn migrate_v9_devices(&self) -> AgentAspectResult<()> {
         self.conn
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS devices (
@@ -411,23 +411,23 @@ impl AuditStore {
                     last_seen TEXT NOT NULL
                 );",
             )
-            .map_err(CheckpointError::MigrateDeviceSchema)?;
+            .map_err(AgentAspectError::MigrateDeviceSchema)?;
         if !self.column_exists("decisions", "device_id")? {
             self.conn
                 .execute("ALTER TABLE decisions ADD COLUMN device_id TEXT", [])
-                .map_err(CheckpointError::MigrateDeviceSchema)?;
+                .map_err(AgentAspectError::MigrateDeviceSchema)?;
         }
         self.conn
             .execute(
                 "CREATE INDEX IF NOT EXISTS idx_decisions_device ON decisions(device_id)",
                 [],
             )
-            .map_err(CheckpointError::MigrateDeviceSchema)?;
+            .map_err(AgentAspectError::MigrateDeviceSchema)?;
         Ok(())
     }
 
     /// v10: 占位迁移（表已在 init_tables 中创建）。
-    fn migrate_v10_conversation_messages(&self) -> CheckpointResult<()> {
+    fn migrate_v10_conversation_messages(&self) -> AgentAspectResult<()> {
         // 占位：表已在 init_tables batch 中创建，未来 schema 变更在此扩展。
         Ok(())
     }
@@ -435,7 +435,7 @@ impl AuditStore {
     /// v11: conversations 表新增运行时身份字段（Runtime Drift Guard）。
     ///
     /// 老数据默认 "unknown" / NULL / 0，不影响查看，只在 resume 时警告。
-    fn migrate_v11_runtime_identity(&self) -> CheckpointResult<()> {
+    fn migrate_v11_runtime_identity(&self) -> AgentAspectResult<()> {
         let columns = [
             ("model_id", "TEXT NOT NULL DEFAULT 'unknown'"),
             ("runtime_profile", "TEXT NOT NULL DEFAULT 'unknown'"),
@@ -455,7 +455,7 @@ impl AuditStore {
                         &format!("ALTER TABLE conversations ADD COLUMN {name} {ty}"),
                         [],
                     )
-                    .map_err(CheckpointError::MigrateConversationSchema)?;
+                    .map_err(AgentAspectError::MigrateConversationSchema)?;
             }
         }
         Ok(())
@@ -465,11 +465,11 @@ impl AuditStore {
     ///
     /// 值：process_exit / process_exit_nonzero / timeout_killed / cancelled / bridge_restart / NULL。
     /// 与 failure_reason 并存：failure_reason 是自由文本（向后兼容），completed_reason 是枚举值（便于查询）。
-    fn migrate_v12_job_completed_reason(&self) -> CheckpointResult<()> {
+    fn migrate_v12_job_completed_reason(&self) -> AgentAspectResult<()> {
         if !self.column_exists("jobs", "completed_reason")? {
             self.conn
                 .execute("ALTER TABLE jobs ADD COLUMN completed_reason TEXT", [])
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         Ok(())
     }
@@ -478,17 +478,17 @@ impl AuditStore {
     ///
     /// nullable TEXT (ISO 8601)，非 NULL 表示该 job 收到了 stop 请求。
     /// bridge tick 检测到后会把 job 从 running 收敛到 terminal 状态。
-    fn migrate_v13_stop_marker(&self) -> CheckpointResult<()> {
+    fn migrate_v13_stop_marker(&self) -> AgentAspectResult<()> {
         if !self.column_exists("jobs", "stop_requested_at")? {
             self.conn
                 .execute("ALTER TABLE jobs ADD COLUMN stop_requested_at TEXT", [])
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         Ok(())
     }
 
     /// v14: 新增 sys_user 表 — 用户名密码登录。
-    fn migrate_v14_sys_user(&self) -> CheckpointResult<()> {
+    fn migrate_v14_sys_user(&self) -> AgentAspectResult<()> {
         self.conn
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS sys_user (
@@ -503,7 +503,7 @@ impl AuditStore {
                     disabled_at TEXT
                 );",
             )
-            .map_err(CheckpointError::MigrateConversationSchema)?;
+            .map_err(AgentAspectError::MigrateConversationSchema)?;
         Ok(())
     }
 
@@ -511,7 +511,7 @@ impl AuditStore {
     ///
     /// workflows 定义一个链式任务流，workflow_steps 定义每一步的执行参数。
     /// steps 按 step_order 串行执行，前一步的 job logs 可通过 context_strategy 传递给下一步。
-    fn migrate_v15_workflows(&self) -> CheckpointResult<()> {
+    fn migrate_v15_workflows(&self) -> AgentAspectResult<()> {
         self.conn
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS workflows (
@@ -546,16 +546,16 @@ impl AuditStore {
                 CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id, step_order);
                 CREATE INDEX IF NOT EXISTS idx_workflow_steps_job ON workflow_steps(job_id);",
             )
-            .map_err(CheckpointError::MigrateConversationSchema)?;
+            .map_err(AgentAspectError::MigrateConversationSchema)?;
         Ok(())
     }
 
     /// v16: jobs 表新增 workflow_id 列，支持工作流审计追踪。
-    fn migrate_v16_job_workflow_id(&self) -> CheckpointResult<()> {
+    fn migrate_v16_job_workflow_id(&self) -> AgentAspectResult<()> {
         if !self.column_exists("jobs", "workflow_id")? {
             self.conn
                 .execute("ALTER TABLE jobs ADD COLUMN workflow_id TEXT", [])
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         Ok(())
     }
@@ -569,7 +569,7 @@ impl AuditStore {
     /// workflow_advance_signals 是 daemon → bridge 的异步信号通道：
     /// - daemon 在 stop hook 匹配到 manual workflow job 时写入
     /// - bridge 后台轮询消费，收到后 resume workflow
-    fn migrate_v17_workflow_advance_mode(&self) -> CheckpointResult<()> {
+    fn migrate_v17_workflow_advance_mode(&self) -> AgentAspectResult<()> {
         // 1. workflows 表新增 advance_mode
         if !self.column_exists("workflows", "advance_mode")? {
             self.conn
@@ -577,7 +577,7 @@ impl AuditStore {
                     "ALTER TABLE workflows ADD COLUMN advance_mode TEXT DEFAULT 'auto' CHECK(advance_mode IN ('auto','manual'))",
                     [],
                 )
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         // 2. 信号表
         self.conn
@@ -595,7 +595,7 @@ impl AuditStore {
                 );
                 CREATE INDEX IF NOT EXISTS idx_advance_signals_unconsumed ON workflow_advance_signals(workflow_id, consumed_at);",
             )
-            .map_err(CheckpointError::MigrateConversationSchema)?;
+            .map_err(AgentAspectError::MigrateConversationSchema)?;
         Ok(())
     }
 
@@ -604,25 +604,25 @@ impl AuditStore {
     /// 存储结构化 thinking/reasoning 内容，由 transcript parser 从 Claude Code
     /// （type: "thinking" block）和 Codex CLI（reasoning/reasoning_summary）提取。
     /// 历史数据默认 NULL，前端对 NULL 的消息不显示 thinking 折叠区。
-    fn migrate_v18_message_thinking(&self) -> CheckpointResult<()> {
+    fn migrate_v18_message_thinking(&self) -> AgentAspectResult<()> {
         if !self.column_exists("conversation_messages", "thinking")? {
             self.conn
                 .execute(
                     "ALTER TABLE conversation_messages ADD COLUMN thinking TEXT",
                     [],
                 )
-                .map_err(CheckpointError::MigrateConversationSchema)?;
+                .map_err(AgentAspectError::MigrateConversationSchema)?;
         }
         Ok(())
     }
 
     /// 遗留迁移：将 decisions 表从 event_id 主键改为自增 id 主键，
     /// 以支持同一 event 的多次决策（覆盖场景）。
-    fn migrate_legacy_decisions_schema(&self) -> CheckpointResult<()> {
+    fn migrate_legacy_decisions_schema(&self) -> AgentAspectResult<()> {
         let mut stmt = self
             .conn
             .prepare("PRAGMA table_info(decisions)")
-            .map_err(CheckpointError::InspectDecisionsSchema)?;
+            .map_err(AgentAspectError::InspectDecisionsSchema)?;
 
         let columns = stmt
             .query_map([], |row| {
@@ -632,9 +632,9 @@ impl AuditStore {
                     row.get::<_, i64>(5)?,
                 ))
             })
-            .map_err(CheckpointError::ReadDecisionsSchema)?
+            .map_err(AgentAspectError::ReadDecisionsSchema)?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(CheckpointError::CollectDecisionsSchema)?;
+            .map_err(AgentAspectError::CollectDecisionsSchema)?;
 
         let has_new_id = columns.iter().any(|(name, _, _)| name == "id");
         let old_event_pk = columns
@@ -663,7 +663,7 @@ impl AuditStore {
                  DROP TABLE decisions_legacy;
                  CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id);",
             )
-            .map_err(CheckpointError::MigrateLegacyDecisionsSchema)?;
+            .map_err(AgentAspectError::MigrateLegacyDecisionsSchema)?;
 
         Ok(())
     }
@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn migrates_legacy_decisions_schema_and_allows_multiple_rows_per_event() {
         let db_path = std::env::temp_dir().join(format!(
-            "checkpoint-audit-migration-{}.db",
+            "agent-aspect-audit-migration-{}.db",
             uuid::Uuid::now_v7()
         ));
 
@@ -1067,8 +1067,8 @@ mod tests {
                 &db_id,
                 "codex_cli",
                 "sess-touch",
-                "Codex CLI · checkpoint",
-                Some("/tmp/checkpoint"),
+                "Codex CLI · agent-aspect",
+                Some("/tmp/agent-aspect"),
                 "2026-04-25T10:00:00Z",
                 "2026-04-25T10:00:00Z",
                 None,
@@ -1098,8 +1098,8 @@ mod tests {
                 &db_id,
                 "claude_code",
                 "sess-count",
-                "Claude Code · checkpoint",
-                Some("/tmp/checkpoint"),
+                "Claude Code · agent-aspect",
+                Some("/tmp/agent-aspect"),
                 "2026-04-25T10:00:00Z",
                 "2026-04-25T10:00:00Z",
                 None,

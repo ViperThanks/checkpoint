@@ -1,10 +1,10 @@
-//! `checkpoint` CLI 入口二进制。
+//! `agent-aspect` CLI 入口二进制。
 //!
 //! 极简的手工参数解析——没有引入 clap/structopt，
 //! 因为一共只有十来个平级子命令，没必要拉依赖。
 //! 每个子命令直接转发到 `commands::cmd_*` 函数。
 
-use checkpoint_cli::commands::{
+use agent_aspect_cli::commands::{
     cmd_audit, cmd_bridge, cmd_conversations, cmd_daemon, cmd_doctor, cmd_init, cmd_launchd,
     cmd_mode, cmd_rules, cmd_status,
 };

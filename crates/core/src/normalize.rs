@@ -4,19 +4,19 @@
 //! 这些函数将原始 payload 转换为统一的 `UnifiedEvent`。
 //! adapter.rs 中的具体适配器委托给这些函数。
 
-use crate::error::{CheckpointError, CheckpointResult};
+use crate::error::{AgentAspectError, AgentAspectResult};
 use crate::event::{AgentId, Phase, ToolInput, UnifiedEvent};
 use crate::wire::ClaudeHookPayload;
 
 /// Claude Code PreToolUse → UnifiedEvent
-pub fn normalize_claude_pre_tool_use(raw: &str) -> CheckpointResult<UnifiedEvent> {
+pub fn normalize_claude_pre_tool_use(raw: &str) -> AgentAspectResult<UnifiedEvent> {
     normalize_pre_tool_use(raw, AgentId::ClaudeCode)
 }
 
 /// Codex CLI PreToolUse → UnifiedEvent
 /// Codex payload 顶层结构与 Claude 同构（额外字段 turn_id / model / permission_mode
 /// 等被 serde 忽略），可直接复用同一解码路径。
-pub fn normalize_codex_pre_tool_use(raw: &str) -> CheckpointResult<UnifiedEvent> {
+pub fn normalize_codex_pre_tool_use(raw: &str) -> AgentAspectResult<UnifiedEvent> {
     normalize_pre_tool_use(raw, AgentId::CodexCli)
 }
 
@@ -27,7 +27,7 @@ pub fn normalize_codex_pre_tool_use(raw: &str) -> CheckpointResult<UnifiedEvent>
 /// - Edit → StrReplaceFile, tool_input.edit.old / edit.new (not old_string / new_string)
 /// - Shell → Shell (not Bash)
 /// 基于 2026-04-24 runtime 实验验证。
-pub fn normalize_kimi_pre_tool_use(raw: &str) -> CheckpointResult<UnifiedEvent> {
+pub fn normalize_kimi_pre_tool_use(raw: &str) -> AgentAspectResult<UnifiedEvent> {
     normalize_pre_tool_use(raw, AgentId::KimiCode)
 }
 
@@ -36,13 +36,13 @@ pub fn normalize_kimi_pre_tool_use(raw: &str) -> CheckpointResult<UnifiedEvent> 
 /// 内置工具名：read_file / write_file / run_shell_command。
 /// Gemini hook event name is "BeforeTool" (not "PreToolUse").
 /// 基于 DOC+SOURCE 证据，待本机 runtime 实验确认。
-pub fn normalize_gemini_pre_tool_use(raw: &str) -> CheckpointResult<UnifiedEvent> {
+pub fn normalize_gemini_pre_tool_use(raw: &str) -> AgentAspectResult<UnifiedEvent> {
     let payload: ClaudeHookPayload =
-        serde_json::from_str(raw).map_err(CheckpointError::ParsePayload)?;
+        serde_json::from_str(raw).map_err(AgentAspectError::ParsePayload)?;
 
     let hook_event = payload.hook_event_name.unwrap_or_default();
     if hook_event != "BeforeTool" {
-        return Err(CheckpointError::UnsupportedHookEvent(hook_event));
+        return Err(AgentAspectError::UnsupportedHookEvent(hook_event));
     }
 
     let tool_name = payload.tool_name.unwrap_or_default();
@@ -58,15 +58,15 @@ pub fn normalize_gemini_pre_tool_use(raw: &str) -> CheckpointResult<UnifiedEvent
 }
 
 /// 通用 PreToolUse 归一化：解析 payload、校验 hook event、提取工具输入。
-fn normalize_pre_tool_use(raw: &str, agent: AgentId) -> CheckpointResult<UnifiedEvent> {
+fn normalize_pre_tool_use(raw: &str, agent: AgentId) -> AgentAspectResult<UnifiedEvent> {
     let payload: ClaudeHookPayload =
-        serde_json::from_str(raw).map_err(CheckpointError::ParsePayload)?;
+        serde_json::from_str(raw).map_err(AgentAspectError::ParsePayload)?;
 
     let tool_name = payload.tool_name.unwrap_or_default();
     let hook_event = payload.hook_event_name.unwrap_or_default();
 
     if hook_event != "PreToolUse" {
-        return Err(CheckpointError::UnsupportedHookEvent(hook_event));
+        return Err(AgentAspectError::UnsupportedHookEvent(hook_event));
     }
 
     let ti = parse_tool_input(&tool_name, &payload.tool_input);

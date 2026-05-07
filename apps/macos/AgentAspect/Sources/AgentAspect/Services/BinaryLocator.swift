@@ -1,4 +1,4 @@
-/// BinaryLocator.swift — Locates the agent-aspect (or legacy checkpoint) binary
+/// BinaryLocator.swift — Locates the agent-aspect binary
 ///
 /// Search order:
 ///   1. App bundle Resources/Binaries/ (release mode)
@@ -10,8 +10,8 @@ import Foundation
 final class BinaryLocator {
 
     /// The name of the CLI binary to search for.
-    /// The existing Rust project produces `checkpoint` as the CLI binary.
-    private let binaryName = "checkpoint"
+    /// The existing Rust project produces `agent-aspect` as the CLI binary.
+    private let binaryName = "agent-aspect"
 
     // MARK: - Binary discovery
 

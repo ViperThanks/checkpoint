@@ -4,7 +4,7 @@
 //! plist 中设置 `RunAtLoad` + `KeepAlive` 保证 daemon 持续运行。
 //! 仅支持 macOS，因为依赖 launchctl 和 ~/Library/LaunchAgents。
 
-use checkpoint_core::paths;
+use agent_aspect_core::paths;
 
 use super::helpers::{bin_dir, run_launchctl};
 
@@ -55,7 +55,7 @@ fn launchd_install() {
     if let Some(parent) = plist_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    std::fs::create_dir_all(paths::checkpoint_dir()).ok();
+    std::fs::create_dir_all(paths::agent_aspect_dir()).ok();
 
     let log_stdout = paths::daemon_stdout_log_path();
     let log_stderr = paths::daemon_stderr_log_path();

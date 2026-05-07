@@ -55,23 +55,12 @@ pub struct AppState {
     pub register_limiter: register::SharedIpRateLimiter,
     /// per-client（per-sid）代理请求速率限制器。
     pub client_limiter: register::SharedClientRateLimiter,
-    /// jti 重放缓存：jti → 首次使用时间，防止同一 token 短期内被重放。
-    pub jti_cache: Mutex<HashMap<String, std::time::Instant>>,
 }
 
 /// 获取 relay 状态目录（~/.agent-aspect-relay/）。
-/// 若新目录不存在但旧目录 ~/.checkpoint-relay/ 存在，则回退到旧目录以保持兼容。
 fn relay_state_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let new_dir = PathBuf::from(&home).join(".agent-aspect-relay");
-    if new_dir.exists() {
-        return new_dir;
-    }
-    let old_dir = PathBuf::from(&home).join(".checkpoint-relay");
-    if old_dir.exists() {
-        return old_dir;
-    }
-    new_dir
+    PathBuf::from(&home).join(".agent-aspect-relay")
 }
 
 /// 获取已注册令牌的持久化文件路径。
@@ -296,7 +285,6 @@ pub async fn run_server() {
         registered_tokens_path,
         register_limiter: Arc::new(Mutex::new(register::IpRateLimiter::new())),
         client_limiter: Arc::new(Mutex::new(register::ClientRateLimiter::new())),
-        jti_cache: Mutex::new(HashMap::new()),
     });
 
     let app = server::app(state);
