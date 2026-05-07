@@ -2,6 +2,15 @@
 
 const CONV_LIST_LIMIT = 500;
 
+/* Clear browser text selection to prevent blue residue on navigation */
+function clearTextSelection() {
+  var active = document.activeElement;
+  var tag = active && active.tagName ? active.tagName.toLowerCase() : '';
+  if (tag === 'textarea' || tag === 'input') return;
+  var sel = window.getSelection && window.getSelection();
+  if (sel && sel.rangeCount) sel.removeAllRanges();
+}
+
 /* ---------- Filter bar ---------- */
 function renderConvFilterBar() {
   const bar = document.getElementById('conv-filter-bar');
@@ -190,6 +199,7 @@ function setConvAgent(agent) {
 
 /* ---------- Detail ---------- */
 function openConvDetail(cid) {
+  clearTextSelection();
   S.conv.detailCid = cid;
   S.conv.subTab = 'chat';
   stopActivityPoll();
@@ -610,6 +620,7 @@ function cancelConvPendingJob(jobId, assistantId) {
 var cleanConvJobLogChunk = cleanAgentLogChunk;
 
 function switchSubTab(sub) {
+  clearTextSelection();
   S.conv.subTab = sub;
   const chatBtn = document.getElementById('sub-chat');
   const toolsBtn = document.getElementById('sub-tools');
@@ -791,8 +802,10 @@ function buildChatMessageHtml(m, tsState, idx) {
   }
   if (m.role === 'assistant') {
     const t = m.thinking ? { thinking: m.thinking, content: m.text || '' } : extractThinking(m.text);
-    const thinkingHtml = buildThinkingHtml(t.thinking, idx || Math.random().toString(36).slice(2, 8));
-    return '<div class="chat-row chat-row-assistant"><div class="chat-msg chat-assistant"><div class="chat-role-row"><span class="chat-role">助手</span>' + ts + '</div>' + thinkingHtml + '<div class="chat-text md-render">' + renderMd(t.content) + '</div></div></div>';
+    const messageId = m.seq || idx || Math.random().toString(36).slice(2, 8);
+    const thinkingHtml = buildThinkingHtml(t.thinking, messageId);
+    const contentHtml = t.content ? '<div class="chat-text md-render">' + renderMd(t.content) + '</div>' : '';
+    return '<div class="chat-row chat-row-assistant"><div class="chat-msg chat-assistant"><div class="chat-role-row"><span class="chat-role">助手</span>' + ts + '</div>' + thinkingHtml + contentHtml + '</div></div>';
   }
   if (m.role === 'tool_summary') {
     const hasFull = m.tool_input_full && m.tool_input_full !== m.tool_input_preview;
@@ -812,6 +825,7 @@ function renderChatMessages(messages, total, el, opts) {
   if (!el) el = document.getElementById('conv-sub-content');
   if (!el) return;
   el.classList.add('chat-mode');
+  clearTextSelection();
   let msgsHtml = '<div class="chat-scroll-sentinel" id="chat-scroll-sentinel"></div><div id="chat-loading-indicator" class="chat-loading"><div class="chat-loading-spinner"></div><span>加载中...</span></div>';
   msgsHtml += buildActivityHtml(messages);
   el.innerHTML = '<div class="chat-messages" id="chat-messages">' + msgsHtml + '</div>' + chatInputBarHtml();
@@ -853,6 +867,7 @@ function startChatPoll() {
 function appendChatMessages(messages) {
   const msgsEl = document.getElementById('chat-messages');
   if (!msgsEl) return;
+  clearTextSelection();
   const nearBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 80;
   let html = buildActivityHtml(messages);
   msgsEl.insertAdjacentHTML('beforeend', html);
