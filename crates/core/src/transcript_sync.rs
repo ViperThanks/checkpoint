@@ -256,6 +256,7 @@ fn sync_from_reader(
                         msg.tool_name,
                         msg.tool_input_preview,
                         msg.tool_input_full,
+                        msg.thinking,
                         raw_hash,
                         now.clone(),
                     ));

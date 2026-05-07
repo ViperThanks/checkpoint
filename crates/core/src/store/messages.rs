@@ -38,19 +38,20 @@ impl AuditStore {
     pub fn sync_messages_and_state_txn(
         &self,
         messages: &[(
-            String,
-            String,
-            i64,
-            String,
-            Option<String>,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            String,
-            String,
+            String,    // 0  id
+            String,    // 1  conversation_id
+            i64,       // 2  seq
+            String,    // 3  role
+            Option<String>, // 4  timestamp
+            String,    // 5  text
+            String,    // 6  source
+            Option<String>, // 7  turn_id
+            Option<String>, // 8  tool_name
+            Option<String>, // 9  tool_input_preview
+            Option<String>, // 10 tool_input_full
+            Option<String>, // 11 thinking
+            String,    // 12 raw_hash
+            String,    // 13 created_at
         )],
         state: &SyncStateRow,
     ) -> CheckpointResult<(usize, i64)> {
@@ -65,11 +66,12 @@ impl AuditStore {
                     .conn
                     .execute(
                         "INSERT OR IGNORE INTO conversation_messages
-                     (id, conversation_id, seq, role, timestamp, text, source, turn_id, tool_name, tool_input_preview, tool_input_full, raw_hash, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                     (id, conversation_id, seq, role, timestamp, text, source, turn_id,
+                      tool_name, tool_input_preview, tool_input_full, thinking, raw_hash, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                         rusqlite::params![
                             msg.0, msg.1, msg.2, msg.3, msg.4, msg.5, msg.6, msg.7, msg.8, msg.9,
-                            msg.10, msg.11, msg.12
+                            msg.10, msg.11, msg.12, msg.13
                         ],
                     )
                     .map_err(CheckpointError::InsertConversationMessage)?;
@@ -151,7 +153,7 @@ impl AuditStore {
         let start = end.saturating_sub(limit as i64);
 
         let mut stmt = self.conn.prepare(
-            "SELECT role, timestamp, text, source, turn_id, tool_name, tool_input_preview, tool_input_full, seq
+            "SELECT role, timestamp, text, source, turn_id, tool_name, tool_input_preview, tool_input_full, thinking, seq
              FROM conversation_messages
              WHERE conversation_id = ?1
              ORDER BY seq ASC
@@ -171,7 +173,8 @@ impl AuditStore {
                         "tool_name": row.get::<_, Option<String>>(5)?,
                         "tool_input_preview": row.get::<_, Option<String>>(6)?,
                         "tool_input_full": row.get::<_, Option<String>>(7)?,
-                        "seq": row.get::<_, i64>(8)?,
+                        "thinking": row.get::<_, Option<String>>(8)?,
+                        "seq": row.get::<_, i64>(9)?,
                     }))
                 },
             )
@@ -189,7 +192,7 @@ impl AuditStore {
         limit: usize,
     ) -> CheckpointResult<Vec<serde_json::Value>> {
         let mut stmt = self.conn.prepare(
-            "SELECT role, timestamp, text, source, turn_id, tool_name, tool_input_preview, tool_input_full, seq
+            "SELECT role, timestamp, text, source, turn_id, tool_name, tool_input_preview, tool_input_full, thinking, seq
              FROM conversation_messages
              WHERE conversation_id = ?1 AND seq > ?2
              ORDER BY seq ASC
@@ -209,7 +212,8 @@ impl AuditStore {
                         "tool_name": row.get::<_, Option<String>>(5)?,
                         "tool_input_preview": row.get::<_, Option<String>>(6)?,
                         "tool_input_full": row.get::<_, Option<String>>(7)?,
-                        "seq": row.get::<_, i64>(8)?,
+                        "thinking": row.get::<_, Option<String>>(8)?,
+                        "seq": row.get::<_, i64>(9)?,
                     }))
                 },
             )

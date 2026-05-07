@@ -164,6 +164,7 @@ impl AuditStore {
                     tool_name TEXT,
                     tool_input_preview TEXT,
                     tool_input_full TEXT,
+                    thinking TEXT,
                     raw_hash TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
@@ -231,6 +232,7 @@ impl AuditStore {
         self.migrate_v15_workflows()?;
         self.migrate_v16_job_workflow_id()?;
         self.migrate_v17_workflow_advance_mode()?;
+        self.migrate_v18_message_thinking()?;
         self.conn
             .execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_conv_agent ON events(conversation_id, agent)",
@@ -594,6 +596,20 @@ impl AuditStore {
                 CREATE INDEX IF NOT EXISTS idx_advance_signals_unconsumed ON workflow_advance_signals(workflow_id, consumed_at);",
             )
             .map_err(CheckpointError::MigrateConversationSchema)?;
+        Ok(())
+    }
+
+    /// v18: conversation_messages 表新增 thinking 列。
+    ///
+    /// 存储结构化 thinking/reasoning 内容，由 transcript parser 从 Claude Code
+    /// （type: "thinking" block）和 Codex CLI（reasoning/reasoning_summary）提取。
+    /// 历史数据默认 NULL，前端对 NULL 的消息不显示 thinking 折叠区。
+    fn migrate_v18_message_thinking(&self) -> CheckpointResult<()> {
+        if !self.column_exists("conversation_messages", "thinking")? {
+            self.conn
+                .execute("ALTER TABLE conversation_messages ADD COLUMN thinking TEXT", [])
+                .map_err(CheckpointError::MigrateConversationSchema)?;
+        }
         Ok(())
     }
 
