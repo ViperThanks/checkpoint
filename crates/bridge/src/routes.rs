@@ -960,9 +960,14 @@ pub fn handle_get_pending(ctx: &AppContext) -> tiny_http::ResponseBox {
         }
     };
 
+    let mut config = checkpoint_core::config::Config::load_or_create();
+    config.approval_review.sanitize();
+    let review_cfg = &config.approval_review;
+
     let events: Vec<serde_json::Value> = decisions
         .into_iter()
         .map(|d| {
+            let review = build_approval_review(&d, review_cfg);
             serde_json::json!({
                 "event_id": d.event_id,
                 "action": d.action,
@@ -973,12 +978,109 @@ pub fn handle_get_pending(ctx: &AppContext) -> tiny_http::ResponseBox {
                 "file_path": d.file_path,
                 "device_id": d.device_id,
                 "device_label": d.device_label,
+                "review": review,
             })
         })
         .collect();
 
     let count = events.len();
     json_response(200, &serde_json::json!({"events": events, "count": count}))
+}
+
+/// 根据 ApprovalReviewConfig 为每条 pending decision 生成 review payload。
+/// 前端只负责渲染，不重复拼业务语义。
+fn build_approval_review(
+    d: &checkpoint_core::audit::DecisionRow,
+    cfg: &checkpoint_core::config::ApprovalReviewConfig,
+) -> serde_json::Value {
+    let agent = agent_display_label(&d.agent);
+
+    let command = if cfg.show_command {
+        extract_review_command(&d.tool_name, d.raw_payload.as_deref())
+    } else {
+        None
+    };
+
+    let payload_preview = if cfg.show_payload_preview {
+        truncate_review_payload(d.raw_payload.as_deref(), cfg.payload_preview_chars)
+    } else {
+        None
+    };
+
+    // 构建 chips
+    let mut chips: Vec<String> = Vec::new();
+    if cfg.show_agent {
+        chips.push(agent.clone());
+    }
+    chips.push(d.tool_name.clone());
+    if cfg.show_rule {
+        if let Some(ref rid) = d.rule_id {
+            chips.push(rid.clone());
+        }
+    }
+
+    let summary = format!("{} 需要审批", d.tool_name);
+    let risk_reason = d
+        .note
+        .split_once(": ")
+        .map(|(_, rest)| rest.to_string())
+        .unwrap_or_else(|| d.note.clone());
+
+    serde_json::json!({
+        "view": cfg.default_view,
+        "summary": summary,
+        "risk_reason": cfg.show_rule.then_some(risk_reason),
+        "agent": cfg.show_agent.then_some(agent),
+        "tool_name": d.tool_name,
+        "file_path": cfg.show_file_path.then_some(d.file_path.clone()),
+        "command": command,
+        "device_label": cfg.show_device.then_some(d.device_label.clone()),
+        "payload_preview": payload_preview,
+        "chips": chips,
+    })
+}
+
+/// 从 raw_payload 提取 command 字段（Bash/shell 等命令行工具）。
+/// 同时读取顶层 `command` 和嵌套 `tool_input.command`，兼容 hook payload 与 normalize 后的格式。
+fn extract_review_command(tool_name: &str, raw_payload: Option<&str>) -> Option<String> {
+    let raw = raw_payload?;
+    let val: serde_json::Value = serde_json::from_str(raw).ok()?;
+    match tool_name {
+        "Bash" | "shell" | "Shell" | "exec_command" | "run_shell_command" => val
+            .get("command")
+            .or_else(|| val.get("tool_input").and_then(|ti| ti.get("command")))
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        _ => None,
+    }
+}
+
+/// 截断 raw_payload 用于审批预览。
+fn truncate_review_payload(raw_payload: Option<&str>, max_chars: usize) -> Option<String> {
+    let raw = raw_payload?;
+    if raw.len() <= max_chars {
+        Some(raw.to_string())
+    } else {
+        // 按 char boundary 截断
+        let end = raw
+            .char_indices()
+            .take_while(|(i, _)| *i < max_chars)
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(max_chars.min(raw.len()));
+        Some(format!("{}...", &raw[..end]))
+    }
+}
+
+/// 返回 agent 字段的可读展示名。
+fn agent_display_label(agent: &str) -> String {
+    match agent {
+        "claude_code" => "Claude Code".to_string(),
+        "codex_cli" => "Codex CLI".to_string(),
+        "kimi_code" => "Kimi Code".to_string(),
+        "gemini_cli" => "Gemini CLI".to_string(),
+        _ => agent.to_string(),
+    }
 }
 
 /// POST /events/:id/feedback 处理器 — 对已完成事件提交反馈（useful/noisy/wrong/unsure）。

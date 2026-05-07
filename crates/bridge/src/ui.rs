@@ -12,7 +12,8 @@
 //! 5. job_body.js — job body 构造原语
 //! 6. runtime_health.js — 运行环境健康 UI
 //! 7. activity_segment.js — 活动时间线折叠（buildSegments, renderSegmentCard, renderTurnBanner）
-//! 8. bridge shell JS — app.js, components.js, tabs/*
+//! 8. approval_review.js — 审批 review payload 统一渲染
+//! 9. bridge shell JS — app.js, components.js, tabs/*
 
 /// 完整的 Dashboard HTML 页面，包含所有 CSS 和 JS。
 /// 修改 ui/ 目录下的文件后需要重新编译才能生效。
@@ -39,6 +40,7 @@ pub const INDEX_HTML: &str = concat!(
     include_str!("../../shared_ui/job_body.js"),
     include_str!("../../shared_ui/runtime_health.js"),
     include_str!("../../shared_ui/activity_segment.js"),
+    include_str!("../../shared_ui/approval_review.js"),
     // === Bridge Shell ===
     include_str!("ui/app.js"),
     include_str!("ui/components.js"),

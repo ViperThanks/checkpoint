@@ -413,7 +413,12 @@ function loadPending() {
 
       const meta = document.createElement('div');
       meta.style.cssText = 'font-size:.7rem;color:var(--dim);margin-top:3px';
-      meta.textContent = (e.file_path ? e.file_path + ' · ' : '') + (e.rule_id ? (S.ruleMap[e.rule_id] || e.rule_id) : '') + ' · ' + ago(e.timestamp);
+      const reviewHtml = renderApprovalReview(e);
+      if (reviewHtml) {
+        meta.innerHTML = reviewHtml;
+      } else {
+        meta.textContent = (e.file_path ? e.file_path + ' · ' : '') + (e.rule_id ? (S.ruleMap[e.rule_id] || e.rule_id) : '') + ' · ' + ago(e.timestamp);
+      }
 
       const act = document.createElement('div');
       act.style.cssText = 'display:flex;gap:6px;margin-top:6px';

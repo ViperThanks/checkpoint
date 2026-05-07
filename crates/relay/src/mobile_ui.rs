@@ -25,6 +25,7 @@ const API_CLIENT_JS: &str = include_str!("../../shared_ui/api_client.js");
 const JOB_BODY_JS: &str = include_str!("../../shared_ui/job_body.js");
 const RUNTIME_HEALTH_JS: &str = include_str!("../../shared_ui/runtime_health.js");
 const ACTIVITY_SEGMENT_JS: &str = include_str!("../../shared_ui/activity_segment.js");
+const APPROVAL_REVIEW_JS: &str = include_str!("../../shared_ui/approval_review.js");
 
 // === Relay Shell ===
 const APP_JS: &str = include_str!("ui/app.js");
@@ -48,12 +49,14 @@ pub async fn serve_ui() -> Response {
         + "\n"
         + ACTIVITY_SEGMENT_JS
         + "\n"
+        + APPROVAL_REVIEW_JS
+        + "\n"
         + APP_JS
         + "\nconsole.log('[agent-aspect-relay] UI bundle v"
         + env!("CARGO_PKG_VERSION")
         + " build="
         + env!("BUILD_TIME")
-        + " shell=relay loaded=marked,view_model,render,api_client,job_body,runtime_health,activity_segment');\n";
+        + " shell=relay loaded=marked,view_model,render,api_client,job_body,runtime_health,activity_segment,approval_review');\n";
     let html = HTML_TEMPLATE
         .replace("/*__CSS__*/", &(DESIGN_TOKENS_CSS.to_string() + "\n" + CSS))
         .replace("/*__JS__*/", &js)

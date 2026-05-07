@@ -113,6 +113,9 @@
   --status-warning:  #ffd60a;
   --status-unknown:  rgba(255, 255, 255, 0.3);
   --status-loading:  #ff9f0a;
+
+  /* ===== Overlay / Backdrop ===== */
+  --backdrop:        rgba(0, 0, 0, 0.58);
 }
 
 /* ===== Light Mode ===== */
@@ -164,6 +167,9 @@
   --status-warning:  #9a6a00;
   --status-unknown:  rgba(18, 22, 32, 0.36);
   --status-loading:  #c76a00;
+
+  /* ===== Overlay / Backdrop ===== */
+  --backdrop:        rgba(18, 22, 32, 0.42);
 }
 
 /* ===== Activity Segment Cards ===== */

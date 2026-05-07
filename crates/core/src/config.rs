@@ -34,6 +34,68 @@ pub struct Config {
     pub providers: HashMap<String, ProviderConfigOverride>,
     #[serde(default)]
     pub relay_url: Option<String>,
+    #[serde(default)]
+    pub approval_review: ApprovalReviewConfig,
+}
+
+/// 审批 review payload 配置 — 控制 /pending 响应中 review 字段展示哪些内容。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ApprovalReviewConfig {
+    #[serde(default = "default_approval_view")]
+    pub default_view: String,
+    #[serde(default = "default_true")]
+    pub show_rule: bool,
+    #[serde(default = "default_true")]
+    pub show_agent: bool,
+    #[serde(default = "default_true")]
+    pub show_device: bool,
+    #[serde(default = "default_true")]
+    pub show_file_path: bool,
+    #[serde(default = "default_true")]
+    pub show_command: bool,
+    #[serde(default)]
+    pub show_payload_preview: bool,
+    #[serde(default = "default_payload_preview_chars")]
+    pub payload_preview_chars: usize,
+}
+
+impl Default for ApprovalReviewConfig {
+    fn default() -> Self {
+        Self {
+            default_view: default_approval_view(),
+            show_rule: true,
+            show_agent: true,
+            show_device: true,
+            show_file_path: true,
+            show_command: true,
+            show_payload_preview: false,
+            payload_preview_chars: default_payload_preview_chars(),
+        }
+    }
+}
+
+fn default_approval_view() -> String {
+    "standard".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_payload_preview_chars() -> usize {
+    800
+}
+
+impl ApprovalReviewConfig {
+    /// 校验并修正无效配置值（不让配置错误导致 bridge 起不来）。
+    pub fn sanitize(&mut self) {
+        if !matches!(self.default_view.as_str(), "compact" | "standard" | "full") {
+            self.default_view = "standard".to_string();
+        }
+        if self.payload_preview_chars > 4000 {
+            self.payload_preview_chars = 4000;
+        }
+    }
 }
 
 fn default_bridge_addr() -> String {
@@ -75,6 +137,7 @@ impl Config {
             provider_binaries: HashMap::new(),
             providers: HashMap::new(),
             relay_url: None,
+            approval_review: ApprovalReviewConfig::default(),
         }
     }
 

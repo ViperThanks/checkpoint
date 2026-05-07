@@ -123,17 +123,13 @@ function renderHomePending(events) {
   }
   let h = '';
   events.slice(0, 3).forEach(e => {
-    const meta = [];
-    if (e.file_path) meta.push(esc(e.file_path.split('/').pop()));
-    if (e.rule_id) meta.push(e.rule_id);
-    const metaStr = meta.length ? meta.join(' · ') : '';
     h += '<div class="pending-card" onclick="jumpToEvent(\'' + jsStr(e.event_id) + '\')">';
     h += '<div class="pending-card-row">';
     h += badge('ask', ACTION_LABELS.ask);
     h += '<span class="pending-card-tool">' + esc(e.tool_name || '-') + '</span>';
     h += '<svg class="pending-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>';
     h += '</div>';
-    if (metaStr) h += '<div class="pending-card-meta">' + metaStr + '</div>';
+    h += renderApprovalReview(e);
     h += '<div class="pending-card-actions" onclick="event.stopPropagation()">';
     h += '<button class="btn btn-sm btn-approve" onclick="homeDecide(\'' + jsStr(e.event_id) + '\',\'allow\')">允许</button>';
     h += '<button class="btn btn-sm btn-reject" onclick="homeDecide(\'' + jsStr(e.event_id) + '\',\'deny\')">拒绝</button>';

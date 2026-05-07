@@ -371,10 +371,7 @@ function renderHomePendingCard() {
     body = '<div style="color:#ef4444;font-size:13px">' + escHtml(err.message) + '</div>';
   } else if (count > 0) {
     body = events.slice(0, 3).map(ev => {
-      const tool = ev.tool_name || '未知';
-      const rule = ev.rule_id || '';
-      const fp = ev.file_path ? ' → ' + shortProject(ev.file_path) : '';
-      const desc = escHtml(tool) + fp + (rule ? ' <span style="color:#666">(' + escHtml(rule) + ')</span>' : '');
+      var desc = renderApprovalReviewCompact(ev) || escHtml(ev.tool_name || '未知');
       return '<div class="pending-event" id="pending-' + ev.event_id + '">' +
         '<div class="pending-event-info">' + desc + '</div>' +
         '<div class="pending-event-actions">' +
