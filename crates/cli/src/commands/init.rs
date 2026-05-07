@@ -126,8 +126,9 @@ fn hook_command(hook: &str, agent: &str) -> String {
 /// 在 JSON hooks 配置中确保指定事件的 hook 条目存在。
 ///
 /// `event_key` 是事件类型（如 "PreToolUse"）。
-/// 检查 `hooks.<event_key>` 数组中是否已有包含 `CHECKPOINT_MARKER` 的条目，
-/// 已有则返回 `false`（不重复写入），否则追加新条目并返回 `true`。
+/// 检查 `hooks.<event_key>` 数组中是否已有当前 hook 条目。
+///
+/// 旧 `checkpoint-hook` 条目会被删除；它不是“已安装”，而是需要迁移的坏路径。
 fn ensure_json_hook_entry(root: &mut serde_json::Value, event_key: &str, command: &str) -> bool {
     let obj = root.as_object_mut().expect("root is object");
     let hooks = obj.entry("hooks").or_insert_with(|| serde_json::json!({}));
@@ -145,17 +146,14 @@ fn ensure_json_hook_entry(root: &mut serde_json::Value, event_key: &str, command
         std::process::exit(1);
     }
 
-    // Check if our hook is already in this event array (match both new and old marker)
+    let arr = event_arr.as_array_mut().unwrap();
+    let before_len = arr.len();
+    arr.retain(|entry| !json_hook_entry_contains(entry, "checkpoint-hook"));
+    let mut changed = arr.len() != before_len;
+
     for entry in event_arr.as_array().unwrap() {
-        if let Some(hooks_arr) = entry.get("hooks").and_then(|h| h.as_array()) {
-            if hooks_arr.iter().any(|h| {
-                h.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|s| s.contains(HOOK_MARKER) || s.contains("checkpoint-hook"))
-                    .unwrap_or(false)
-            }) {
-                return false; // already installed
-            }
+        if json_hook_entry_contains(entry, HOOK_MARKER) {
+            return changed;
         }
     }
 
@@ -170,7 +168,24 @@ fn ensure_json_hook_entry(root: &mut serde_json::Value, event_key: &str, command
     });
 
     event_arr.as_array_mut().unwrap().push(hook_entry);
-    true
+    changed = true;
+    changed
+}
+
+/// 判断单个 JSON hook entry 是否引用了指定命令片段。
+fn json_hook_entry_contains(entry: &serde_json::Value, needle: &str) -> bool {
+    entry
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|hooks_arr| {
+            hooks_arr.iter().any(|h| {
+                h.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|s| s.contains(needle))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// 为 Claude Code 安装 hooks（settings.json）。
@@ -242,10 +257,11 @@ fn install_kimi(hook: &str) {
         .collect::<Vec<_>>()
         .join("\n");
 
+    let (cleaned, removed_legacy) = remove_legacy_kimi_hooks(&content);
+    content = cleaned;
+
     for event in events {
-        let needle = format!("event = \"{event}\"");
-        // Check if this event is already registered with our hook
-        let already = content.lines().any(|line| line.trim() == needle);
+        let already = kimi_event_has_current_hook(&content, event);
 
         if !already {
             if !content.trim().is_empty() && !content.ends_with('\n') {
@@ -264,7 +280,7 @@ fn install_kimi(hook: &str) {
         }
     }
 
-    if !installed.is_empty() {
+    if removed_legacy || !installed.is_empty() {
         backup(&path);
         if let Err(e) = std::fs::write(&path, content) {
             eprintln!("FAIL: write {}: {e}", path.display());
@@ -272,12 +288,87 @@ fn install_kimi(hook: &str) {
         }
         println!(
             "Kimi Code: installed hooks {} ({})",
-            installed.join(", "),
+            if installed.is_empty() {
+                "legacy cleanup".to_string()
+            } else {
+                installed.join(", ")
+            },
             path.display()
         );
     } else {
         println!("Kimi Code: already configured ({})", path.display());
     }
+}
+
+/// 删除 Kimi TOML 中引用旧 `checkpoint-hook` 的整个 `[[hooks]]` 段。
+fn remove_legacy_kimi_hooks(content: &str) -> (String, bool) {
+    let mut output = Vec::new();
+    let mut current_block = Vec::new();
+    let mut in_hook = false;
+    let mut removed = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[[hooks]]" {
+            flush_kimi_hook_block(&mut output, &mut current_block, &mut in_hook, &mut removed);
+            in_hook = true;
+            current_block.push(line.to_string());
+        } else if in_hook && trimmed.starts_with('[') {
+            flush_kimi_hook_block(&mut output, &mut current_block, &mut in_hook, &mut removed);
+            output.push(line.to_string());
+        } else if in_hook {
+            current_block.push(line.to_string());
+        } else {
+            output.push(line.to_string());
+        }
+    }
+    flush_kimi_hook_block(&mut output, &mut current_block, &mut in_hook, &mut removed);
+
+    (output.join("\n"), removed)
+}
+
+/// 将当前 Kimi hook block 写回或丢弃。
+fn flush_kimi_hook_block(
+    output: &mut Vec<String>,
+    current_block: &mut Vec<String>,
+    in_hook: &mut bool,
+    removed: &mut bool,
+) {
+    if !*in_hook {
+        return;
+    }
+    let is_legacy = current_block
+        .iter()
+        .any(|line| line.contains("checkpoint-hook"));
+    if is_legacy {
+        *removed = true;
+    } else {
+        output.append(current_block);
+    }
+    current_block.clear();
+    *in_hook = false;
+}
+
+/// 判断 Kimi 某个事件是否已经指向当前 `agent-aspect-hook`。
+fn kimi_event_has_current_hook(content: &str, event: &str) -> bool {
+    let mut in_matching_hook = false;
+    let event_line = format!("event = \"{event}\"");
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[[hooks]]" {
+            in_matching_hook = false;
+            continue;
+        }
+        if trimmed == event_line {
+            in_matching_hook = true;
+            continue;
+        }
+        if in_matching_hook && trimmed.starts_with("command = ") {
+            return trimmed.contains(HOOK_MARKER);
+        }
+    }
+    false
 }
 
 /// 读取 JSON 文件，不存在则返回空对象 `{}`。
@@ -387,6 +478,33 @@ mod tests {
     }
 
     #[test]
+    fn json_hook_entry_replaces_legacy_checkpoint_hook() {
+        let mut root = serde_json::json!({
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "*",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "/tmp/checkpoint-hook"
+                            }
+                        ]
+                    }
+                ]
+            }
+        });
+        let command = "AGENT_ASPECT_AGENT=claude /usr/local/bin/agent-aspect-hook";
+
+        assert!(ensure_json_hook_entry(&mut root, "PreToolUse", command));
+        let entries = root["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        let rendered = serde_json::to_string(&root).unwrap();
+        assert!(rendered.contains("agent-aspect-hook"));
+        assert!(!rendered.contains("checkpoint-hook"));
+    }
+
+    #[test]
     fn install_codex_registers_stop_hook() {
         let mut root = serde_json::json!({});
         let command = "AGENT_ASPECT_AGENT=codex /usr/local/bin/agent-aspect-hook";
@@ -421,6 +539,33 @@ mod tests {
         }
         // Just verify Stop is in the install list
         assert!(events.contains(&"Stop"));
+    }
+
+    #[test]
+    fn kimi_legacy_hook_cleanup_preserves_other_sections() {
+        let content = r#"default_model = "kimi"
+
+[[hooks]]
+event = "PreToolUse"
+command = "/tmp/checkpoint-hook"
+timeout = 5
+
+[models.kimi]
+provider = "managed:kimi"
+
+[[hooks]]
+event = "Stop"
+command = "AGENT_ASPECT_AGENT=kimi /tmp/agent-aspect-hook"
+"#;
+
+        let (cleaned, removed) = remove_legacy_kimi_hooks(content);
+
+        assert!(removed);
+        assert!(!cleaned.contains("checkpoint-hook"));
+        assert!(cleaned.contains("[models.kimi]"));
+        assert!(cleaned.contains("agent-aspect-hook"));
+        assert!(kimi_event_has_current_hook(&cleaned, "Stop"));
+        assert!(!kimi_event_has_current_hook(&cleaned, "PreToolUse"));
     }
 
     #[test]
