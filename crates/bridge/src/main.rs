@@ -299,6 +299,20 @@ fn main() {
                         routes::handle_get_relay_pairing()
                     }
                 }
+                (true, _, "/hook-status") => {
+                    if !auth::check_auth(&request, &token) {
+                        routes::json_response(403, &serde_json::json!({"error": "unauthorized"}))
+                    } else {
+                        routes::handle_get_hook_status()
+                    }
+                }
+                (_, true, "/hook-config") => {
+                    if !auth::check_auth(&request, &token) {
+                        routes::json_response(403, &serde_json::json!({"error": "unauthorized"}))
+                    } else {
+                        routes::handle_post_hook_config(&mut request, &broadcaster)
+                    }
+                }
                 (true, _, "/events") => {
                     if !auth::check_auth(&request, &token) {
                         routes::json_response(403, &serde_json::json!({"error": "unauthorized"}))

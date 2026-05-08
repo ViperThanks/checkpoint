@@ -17,6 +17,7 @@ pub mod decision;
 pub mod env_compat;
 pub mod error;
 pub mod event;
+pub mod hook_status;
 pub mod learn;
 pub mod normalize;
 pub mod password;

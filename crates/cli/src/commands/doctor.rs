@@ -9,6 +9,7 @@
 
 use agent_aspect_core::audit::AuditStore;
 use agent_aspect_core::config::Config;
+use agent_aspect_core::hook_status;
 use agent_aspect_core::paths;
 
 use super::bridge::load_and_verify_state;
@@ -44,6 +45,7 @@ pub fn cmd_doctor() {
         check_daemon_log(),
         check_bridge_status(),
         check_claude_hooks(),
+        check_hook_status(),
     ];
 
     let mut has_fail = false;
@@ -416,4 +418,55 @@ fn contains_agent_aspect_hook(item: &serde_json::Value) -> bool {
         }
     }
     false
+}
+
+/// 检查所有 agent 的 hook 状态（enabled、installed events、missing events）。
+fn check_hook_status() -> CheckResult {
+    let config = Config::load_or_create();
+    let hook_binary = paths::hook_binary_path();
+
+    let status = hook_status::read_full_status(&config, hook_binary.as_ref());
+
+    let all_ok = status.agents.iter().all(|a| a.status.as_str() == "ok");
+
+    let details: Vec<String> = status
+        .agents
+        .iter()
+        .map(|a| {
+            let flag = match a.status.as_str() {
+                "ok" => "ok",
+                "disabled" => "disabled",
+                "partial" => "partial",
+                "missing_config" => "no-config",
+                "missing_hook_binary" => "no-binary",
+                other => other,
+            };
+            format!(
+                "{}:{}({})",
+                a.label,
+                flag,
+                if a.enabled { "en" } else { "dis" }
+            )
+        })
+        .collect();
+
+    if all_ok {
+        CheckResult {
+            status: CheckStatus::Ok,
+            label: "agent hooks".into(),
+            message: details.join(", "),
+        }
+    } else {
+        let issues: Vec<&str> = status
+            .agents
+            .iter()
+            .filter(|a| a.status.as_str() != "ok")
+            .map(|a| a.label.as_str())
+            .collect();
+        CheckResult {
+            status: CheckStatus::Warn,
+            label: "agent hooks".into(),
+            message: format!("{}: run `agent-aspect hooks status` for details", issues.join(", ")),
+        }
+    }
 }

@@ -39,9 +39,9 @@
 | `error.rs` | 统一错误类型，覆盖 DB/配置/协议/任务全链路 |
 | `constants.rs` | 集中常量：分页上限、截断长度、聚合窗口 |
 | `utils.rs` | 通用工具：Unicode 字符截断 + Claude 项目目录解析 |
-| `paths.rs` | File system paths: all standard locations under `~/.agent-aspect/` |
-| `config.rs` | TOML 配置的加载、保存、默认值生成 |
-| `decision.rs` | 决策类型：Action 枚举 + Decision 记录 |
+| `paths.rs` | File system paths: all standard locations under `~/.agent-aspect/` + `hook_binary_path()` |
+| `config.rs` | TOML 配置的加载、保存、默认值生成（含 AgentHookConfig per-agent 开关） |
+| `hook_status.rs` | Hook 状态读取模块：AgentHookStrategy trait + Claude/Codex/Kimi 三种实现 |
 | `event.rs` | 核心事件类型：UnifiedEvent / AgentId / Phase / Risk / Scope / ToolInput |
 | `wire.rs` | 线路协议：hook 请求/响应/HookResponse 的数据结构 |
 | `adapter.rs` | Provider 适配器 trait 和 Claude/Codex/Kimi/Gemini 四个实现 |
@@ -75,7 +75,7 @@
 | `main.rs` | HTTP 服务入口：配置加载 → token 生成 → 端口绑定 → 路由分发 → relay 客户端 |
 | `auth.rs` | Bearer token 生成/持久化、relay 注册和凭证管理 |
 | `context.rs` | 共享应用上下文（AuditStore + ProviderResolver 的容器） |
-| `routes.rs` | HTTP 路由处理器：全部 REST API（事件/会话/模式/决策/反馈/活动聚合） |
+| `routes.rs` | HTTP 路由处理器：全部 REST API（事件/会话/模式/决策/反馈/活动聚合 + hook-status/hook-config） |
 | `jobs.rs` | Job 编排（排队、执行、超时保护、SSE 日志流、崩溃恢复） |
 | `provider.rs` | Provider CLI 命令构建（new/continue 由 conversation_id 判定） |
 | `relay_client.rs` | Relay WebSocket 客户端（后台线程代理手机请求到本地 Bridge） |
@@ -90,6 +90,7 @@
 | `ui/tabs/events.js` | Events tab：审计事件列表 + 筛选 |
 | `ui/tabs/conversations.js` | Conversations tab：会话列表、详情、继续/新建 |
 | `ui/tabs/run.js` | Run tab：agent prompt 提交、job 状态跟踪 |
+| `ui/tabs/hooks.js` | Hooks tab：全局/agent PreToolUse/metadata/stop 开关 + reconcile + SSE 实时更新 |
 
 ---
 
@@ -120,7 +121,7 @@
 | `main.rs` | Relay 进程入口 |
 | `server.rs` | axum 路由定义 |
 | `mobile_ui.rs` | 前端注入：按顺序拼接 job_body.js + app.js → HTML |
-| `http.rs` | HTTP 代理层：body 透传不修改，路径白名单控制 |
+| `http.rs` | HTTP 代理层：body 透传不修改，路径白名单控制（含 mac-status 端点 + hook 白名单） |
 | `ws.rs` | WebSocket 长连接：Mac Bridge ↔ Relay 双向通信 |
 | `register.rs` | Bridge 注册/注销 API：签发 token 对 + 持久化 sid 名册 |
 | `token.rs` | HMAC-SHA256 自验证令牌签发和验证 |
@@ -132,7 +133,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| `ui/app.js` | 手机端 shell：状态、渲染、事件绑定；业务原语来自 `crates/shared_ui/` |
+| `ui/app.js` | 手机端 shell：两阶段 home 加载（先查 mac-status，offline 跳过数据请求）+ beat 恢复触发 |
 | `ui/app_test.js` | 手机端 shell + shared_ui 生产函数测试 |
 | `ui/index.html` | HTML 模板 |
 | `ui/style.css` | 手机端布局样式；主题 token 来自 `crates/shared_ui/design_tokens.css` |
@@ -150,10 +151,11 @@
 | `commands/rules.rs` | 以 Guard 模式实例化 RuleEngine 并打印默认规则 |
 | `commands/audit.rs` | 查询 audit.db 中最近的审计决策记录 |
 | `commands/mode.rs` | 查看或设置 config.toml 中的 daemon 运行模式 |
-| `commands/doctor.rs` | 11 项安装健康检查（二进制/进程/socket/配置/hooks） |
+| `commands/doctor.rs` | 12 项安装健康检查（二进制/进程/socket/配置/hooks，含所有 agent hook 状态） |
+| `commands/hooks.rs` | `agent-aspect hooks` 命令：status/enable/disable/reconcile hook 配置 |
 | `commands/launchd.rs` | macOS launchd 服务管理（plist 生成 + launchctl） |
 | `commands/bridge.rs` | Bridge HTTP 服务器生命周期、relay、keep-awake 管理 |
-| `commands/init.rs` | 为 Claude Code / Codex CLI / Kimi Code 安装 hook 配置 |
+| `commands/init.rs` | 为 Claude Code / Codex CLI / Kimi Code 安装 hook 配置（遵循 Config.enabled） |
 | `commands/conversations.rs` | 从 provider transcript 导入会话标题 |
 | `commands/daemon.rs` | agent-aspectd daemon start/stop/restart/status |
 | `commands/helpers.rs` | 跨命令共享辅助：按 agent-aspect 新命名定位兄弟二进制和封装 launchctl 调用 |

@@ -31,7 +31,8 @@ const S={
   tab:'home',
   conv:{offset:0,total:0,agentFilter:'',detailCid:null,subTab:'chat',messagesLoaded:false},
   home:{pendingCount:0,lastJob:null,convos:[],activeJobConvId:null},
-  ruleMap:{},jobKinds:{}
+  ruleMap:{},jobKinds:{},
+  hooks:null
 };
 let timer=null;
 
@@ -157,15 +158,15 @@ function setMode(m){
 function switchTab(tab){
   S.tab=tab;
   // Update sidebar
-  ['home','conv','events','run','workflows'].forEach(t=>{
+  ['home','conv','events','run','workflows','hooks'].forEach(t=>{
     const el=document.getElementById('nav-'+t);if(el)el.classList.toggle('active',tab===t);
   });
   // Update mobile tab bar
-  ['home','conv','events','run','workflows'].forEach(t=>{
+  ['home','conv','events','run','workflows','hooks'].forEach(t=>{
     const el=document.getElementById('tab-'+t);if(el)el.classList.toggle('active',tab===t);
   });
   // Show/hide views
-  ['home','conv','events','run','workflows'].forEach(t=>{
+  ['home','conv','events','run','workflows','hooks'].forEach(t=>{
     const el=document.getElementById(t+'-view');if(el)el.classList.toggle('hidden',tab!==t);
   });
   // Hide detail panel when switching tabs
@@ -179,6 +180,7 @@ function switchTab(tab){
   }
   else if(tab==='run'&&typeof loadRunContext==='function'){loadRunContext();loadJobHistory();}
   else if(tab==='workflows'&&typeof loadWorkflows==='function'){loadWorkflows();}
+  else if(tab==='hooks'&&typeof loadHooks==='function'){loadHooks();}
 }
 
 // ===== Detail Panel =====
@@ -269,6 +271,9 @@ function startSSE(){
   });
   es.addEventListener('workflow_step_status',function(){
     if(S.tab==='workflows'&&WFS.selected&&typeof selectWorkflow==='function')selectWorkflow(WFS.selected.id);
+  });
+  es.addEventListener('hook_config',function(){
+    if(S.tab==='hooks'&&typeof loadHooks==='function')loadHooks();
   });
   es.onerror=()=>{
     es.close();window._sse=null;

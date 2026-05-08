@@ -9,6 +9,7 @@
 //! - 已安装过的不重复写入（通过检查 "agent-aspect-hook" 标记判断）
 //! - hook 命令中注入 `AGENT_ASPECT_AGENT=<agent>` 环境变量
 
+use agent_aspect_core::config::Config;
 use agent_aspect_core::paths;
 
 use super::helpers::bin_dir;
@@ -60,10 +61,25 @@ fn init_agents() {
         .display()
         .to_string();
 
+    // 读取 config，检查 per-agent enabled 开关
+    let config = Config::load_or_create();
+
     println!("agent-aspect init: installing agent hook configs");
-    install_claude(&hook);
-    install_codex(&hook);
-    install_kimi(&hook);
+    if config.agent_hook_config("claude_code").enabled {
+        install_claude(&hook);
+    } else {
+        println!("Claude Code: disabled in config, skipping hook installation");
+    }
+    if config.agent_hook_config("codex_cli").enabled {
+        install_codex(&hook);
+    } else {
+        println!("Codex CLI: disabled in config, skipping hook installation");
+    }
+    if config.agent_hook_config("kimi_code").enabled {
+        install_kimi(&hook);
+    } else {
+        println!("Kimi Code: disabled in config, skipping hook installation");
+    }
     println!("agent-aspect init: done");
 }
 

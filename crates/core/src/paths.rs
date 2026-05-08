@@ -156,3 +156,14 @@ pub fn codex_hooks_path() -> PathBuf {
 pub fn kimi_config_path() -> PathBuf {
     home_dir().join(".kimi").join("config.toml")
 }
+
+/// Hook 二进制路径（相对于当前进程所在目录）。
+///
+/// 检查文件是否存在，存在时返回 canonicalize 后的路径，否则返回 None。
+pub fn hook_binary_path() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.join("agent-aspect-hook")))
+        .filter(|p| p.exists())
+        .map(|p| p.canonicalize().unwrap_or(p))
+}

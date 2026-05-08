@@ -31,13 +31,14 @@ const ALLOWED_GET_PATHS: &[&str] = &[
     "/jobs",
     "/conversations",
     "/workflows",
+    "/hook-status",
 ];
 
 /// 允许代理的 GET 路径前缀（前缀匹配）。
 const ALLOWED_GET_PREFIXES: &[&str] = &["/conversations/", "/jobs/", "/workflows/"];
 
 /// 允许代理的 POST 路径（精确匹配）。
-const ALLOWED_POST_PATHS: &[&str] = &["/jobs", "/decide", "/workflows"];
+const ALLOWED_POST_PATHS: &[&str] = &["/jobs", "/decide", "/workflows", "/hook-config"];
 
 /// 允许代理的 POST 路径前缀（前缀匹配）。
 const ALLOWED_POST_PREFIXES: &[&str] = &["/jobs/", "/workflows/"];
@@ -53,6 +54,19 @@ const ALLOWED_DELETE_PATHS: &[&str] = &[];
 
 /// 允许代理的 DELETE 路径前缀（前缀匹配）。
 const ALLOWED_DELETE_PREFIXES: &[&str] = &["/workflows/"];
+
+/// 查询 Mac Bridge 是否在线（relay 本地端点，不代理到 Bridge）。
+pub async fn handle_mac_status(
+    State(state): State<Arc<crate::AppState>>,
+    client: VerifiedClient,
+) -> Response {
+    let online = state.registry.lock().await.is_online(&client.sid);
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({"online": online})),
+    )
+        .into_response()
+}
 
 /// GET 请求代理入口：无 body。
 pub async fn proxy_get(

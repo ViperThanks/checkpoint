@@ -27,6 +27,7 @@ pub fn app(state: Arc<crate::AppState>) -> Router {
         .route("/api/unregister", post(register::handle_unregister))
         .route("/api/health", get(crate::http::proxy_get))
         .route("/api/beat-from-mobile", post(crate::beat::handle_beat))
+        .route("/api/mac-status", get(crate::http::handle_mac_status))
         .route("/api/overview", get(crate::http::proxy_get))
         .route("/api/pending", get(crate::http::proxy_get))
         .route("/api/run/context", get(crate::http::proxy_get))
@@ -50,6 +51,9 @@ pub fn app(state: Arc<crate::AppState>) -> Router {
         .route("/api/jobs/{id}/cancel", post(crate::http::proxy_post))
         .route("/api/jobs/{id}/logs/delta", post(crate::http::proxy_post))
         .route("/api/decide", post(crate::http::proxy_post))
+        // hook 代理路由
+        .route("/api/hook-status", get(crate::http::proxy_get))
+        .route("/api/hook-config", post(crate::http::proxy_post))
         // workflow 代理路由
         .route("/api/workflows", get(crate::http::proxy_get))
         .route("/api/workflows", post(crate::http::proxy_post))

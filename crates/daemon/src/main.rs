@@ -169,16 +169,40 @@ fn handle_client(mut stream: UnixStream, store: &AuditStore, engine: &RuleEngine
                 log_info!("register device failed: {e}");
             }
 
-            // PreToolUse 评估开关关闭时，直接放行，不运行规则引擎。
-            let pretooluse_enabled = Config::load(&Config::config_path())
-                .map(|c| c.pretooluse_enabled)
-                .unwrap_or(true);
-            if !pretooluse_enabled {
+            // 三级开关判断：全局 → agent enabled → agent pretooluse
+            let cfg =
+                Config::load(&Config::config_path()).unwrap_or_else(|_| Config::default_config());
+            let agent_str = agent.as_ref().map(|a| a.as_str()).unwrap_or("claude_code");
+
+            if !cfg.pretooluse_enabled {
                 log_info!("pretooluse evaluation disabled, allowing");
                 let resp = WireResponse {
                     event_id: None,
                     action: Action::Allow,
                     note: "pretooluse evaluation disabled".to_string(),
+                };
+                write_wire_response(&mut stream, &resp);
+                return;
+            }
+
+            let agent_hook = cfg.agent_hook_config(agent_str);
+            if !agent_hook.enabled {
+                log_info!("agent {agent_str} disabled, allowing");
+                let resp = WireResponse {
+                    event_id: None,
+                    action: Action::Allow,
+                    note: "agent disabled".to_string(),
+                };
+                write_wire_response(&mut stream, &resp);
+                return;
+            }
+
+            if !agent_hook.pretooluse_enabled {
+                log_info!("agent {agent_str} pretooluse disabled, allowing");
+                let resp = WireResponse {
+                    event_id: None,
+                    action: Action::Allow,
+                    note: "agent pretooluse disabled".to_string(),
                 };
                 write_wire_response(&mut stream, &resp);
                 return;
@@ -262,20 +286,50 @@ fn handle_client(mut stream: UnixStream, store: &AuditStore, engine: &RuleEngine
             handle_override(&override_request, store, &mut stream, device_id.as_deref());
         }
         WireRequest::Metadata { payload, agent, .. } => {
-            handle_metadata(&payload, agent.as_ref(), store, &mut stream);
+            // 检查 per-agent metadata 开关
+            let cfg =
+                Config::load(&Config::config_path()).unwrap_or_else(|_| Config::default_config());
+            let agent_str = agent.as_ref().map(|a| a.as_str()).unwrap_or("claude_code");
+            let agent_hook = cfg.agent_hook_config(agent_str);
+            if !agent_hook.enabled || !agent_hook.metadata_enabled {
+                log_info!("agent {agent_str} metadata disabled, allowing");
+                let resp = WireResponse {
+                    event_id: None,
+                    action: Action::Allow,
+                    note: String::new(),
+                };
+                write_wire_response(&mut stream, &resp);
+            } else {
+                handle_metadata(&payload, agent.as_ref(), store, &mut stream);
+            }
         }
         WireRequest::Stop {
             payload,
             agent,
             device_id,
         } => {
-            handle_stop(
-                &payload,
-                agent.as_ref(),
-                device_id.as_deref(),
-                store,
-                &mut stream,
-            );
+            // 检查 per-agent stop 开关
+            let cfg =
+                Config::load(&Config::config_path()).unwrap_or_else(|_| Config::default_config());
+            let agent_str = agent.as_ref().map(|a| a.as_str()).unwrap_or("claude_code");
+            let agent_hook = cfg.agent_hook_config(agent_str);
+            if !agent_hook.enabled || !agent_hook.stop_enabled {
+                log_info!("agent {agent_str} stop disabled, allowing");
+                let resp = WireResponse {
+                    event_id: None,
+                    action: Action::Allow,
+                    note: String::new(),
+                };
+                write_wire_response(&mut stream, &resp);
+            } else {
+                handle_stop(
+                    &payload,
+                    agent.as_ref(),
+                    device_id.as_deref(),
+                    store,
+                    &mut stream,
+                );
+            }
         }
     }
 }

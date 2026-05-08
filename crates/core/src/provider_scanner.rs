@@ -603,7 +603,7 @@ mod tests {
         let tmp = tmp_dir();
         let script = tmp.join("claude");
         let mut f = std::fs::File::create(&script).unwrap();
-        f.write_all(b"#!/bin/sh\nsleep 60\n").unwrap();
+        f.write_all(b"#!/bin/sh\n/bin/sleep 60\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -631,7 +631,11 @@ mod tests {
             .find(|r| r.provider == "claude_code")
             .unwrap();
         assert_eq!(claude.status, ProviderStatus::Partial);
-        assert!(claude.warnings.iter().any(|w| w.contains("timeout")));
+        assert!(
+            claude.warnings.iter().any(|w| w.contains("timeout")),
+            "expected timeout in warnings, got: {:?}",
+            claude.warnings
+        );
         // 必须在 ~300ms 内返回，不能等 sleep 60s
         assert!(
             elapsed < Duration::from_secs(3),

@@ -17,6 +17,8 @@ use agent_aspect_core::audit::{
     AuditStore, ConversationInfo, ConversationRow, DecisionRow, FeedbackRow,
 };
 use agent_aspect_core::config::Config;
+use agent_aspect_core::hook_status;
+use agent_aspect_core::paths;
 use agent_aspect_core::provider_registry::ProviderRegistry;
 use agent_aspect_core::rule::Mode;
 use agent_aspect_core::title_import;
@@ -2916,4 +2918,129 @@ pub fn handle_get_learn_rules(ctx: &AppContext) -> tiny_http::ResponseBox {
             &serde_json::json!({"error": format!("query learned rules: {e}")}),
         ),
     }
+}
+
+// ── Hook Status / Config ─────────────────────────────────────────────
+
+/// GET /hook-status — 返回全局和 per-agent hook 配置状态。
+pub fn handle_get_hook_status() -> tiny_http::ResponseBox {
+    let config = Config::load_or_create();
+    let hook_binary = paths::hook_binary_path();
+    let status = hook_status::read_full_status(&config, hook_binary.as_ref());
+    match serde_json::to_value(&status) {
+        Ok(v) => json_response(200, &v),
+        Err(e) => json_response(
+            500,
+            &serde_json::json!({"error": format!("serialize: {e}")}),
+        ),
+    }
+}
+
+/// POST /hook-config — 结构化 patch 更新 hook 配置。
+///
+/// Body 格式：`{ "pretooluse_enabled": bool, "agents": { "<agent>": { ... } }, "reconcile": bool }`
+/// 写入 config.toml 后可选执行 reconcile，广播 SSE hook_config 事件。
+pub fn handle_post_hook_config(
+    request: &mut tiny_http::Request,
+    broadcaster: &crate::sse::SharedBroadcaster,
+) -> tiny_http::ResponseBox {
+    let parsed = match read_json_body(request) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+
+    let config_path = Config::config_path();
+    let mut cfg = Config::load(&config_path).unwrap_or_else(|_| Config::default_config());
+
+    // 全局 pretooluse 开关
+    if let Some(v) = parsed.get("pretooluse_enabled").and_then(|v| v.as_bool()) {
+        cfg.pretooluse_enabled = v;
+    }
+
+    // per-agent 开关
+    if let Some(agents) = parsed.get("agents").and_then(|v| v.as_object()) {
+        let valid_agents = ["claude_code", "codex_cli", "kimi_code"];
+        for (agent_key, patch) in agents {
+            if !valid_agents.contains(&agent_key.as_str()) {
+                return json_response(
+                    400,
+                    &serde_json::json!({"error": format!("unknown agent: {agent_key}")}),
+                );
+            }
+            let entry = cfg.agent_hooks.entry(agent_key.clone()).or_default();
+            if let Some(v) = patch.get("enabled").and_then(|v| v.as_bool()) {
+                entry.enabled = v;
+            }
+            if let Some(v) = patch.get("pretooluse_enabled").and_then(|v| v.as_bool()) {
+                entry.pretooluse_enabled = v;
+            }
+            if let Some(v) = patch.get("metadata_enabled").and_then(|v| v.as_bool()) {
+                entry.metadata_enabled = v;
+            }
+            if let Some(v) = patch.get("stop_enabled").and_then(|v| v.as_bool()) {
+                entry.stop_enabled = v;
+            }
+        }
+    }
+
+    if let Err(e) = cfg.save(&config_path) {
+        return json_response(
+            500,
+            &serde_json::json!({"error": format!("save config: {e}")}),
+        );
+    }
+
+    // 可选 reconcile
+    let reconcile = parsed
+        .get("reconcile")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let reconcile_reports = if reconcile {
+        let hook_binary = paths::hook_binary_path();
+        let Some(hook_binary) = hook_binary else {
+            return json_response(
+                500,
+                &serde_json::json!({"error": "hook binary not found"}),
+            );
+        };
+        let hook_str = hook_binary.display().to_string();
+        let mut reports = Vec::new();
+        let mut errors = Vec::new();
+        for strategy in hook_status::strategies() {
+            let agent_cfg = cfg.agent_hook_config(strategy.agent_id());
+            let result = if agent_cfg.enabled {
+                strategy.reconcile_add(&hook_str)
+            } else {
+                strategy.reconcile_remove()
+            };
+            match result {
+                Ok(report) => reports.push(report),
+                Err(e) => errors.push(format!("{}: {e}", strategy.label())),
+            }
+        }
+        if !errors.is_empty() {
+            return json_response(
+                500,
+                &serde_json::json!({"error": "reconcile failed", "details": errors}),
+            );
+        }
+        Some(reports)
+    } else {
+        None
+    };
+
+    // SSE 广播
+    broadcaster.lock().unwrap().broadcast(crate::sse::SseEvent {
+        event_type: "hook_config".to_string(),
+        data: serde_json::to_string(&cfg.agent_hooks).unwrap_or_default(),
+    });
+
+    json_response(
+        200,
+        &serde_json::json!({
+            "ok": true,
+            "reconcile_reports": reconcile_reports,
+        }),
+    )
 }

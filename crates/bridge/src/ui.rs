@@ -49,6 +49,7 @@ pub const INDEX_HTML: &str = concat!(
     include_str!("ui/tabs/events.js"),
     include_str!("ui/tabs/run.js"),
     include_str!("ui/tabs/workflows.js"),
+    include_str!("ui/tabs/hooks.js"),
     // === 版本信息 ===
     "\nconsole.log('[agent-aspect-bridge] UI bundle v",
     env!("CARGO_PKG_VERSION"),

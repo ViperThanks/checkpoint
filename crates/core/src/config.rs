@@ -11,6 +11,30 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Per-agent hook 控制配置 — 控制该 agent 的 hook 安装和各类事件评估开关。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentHookConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub pretooluse_enabled: bool,
+    #[serde(default = "default_true")]
+    pub metadata_enabled: bool,
+    #[serde(default = "default_true")]
+    pub stop_enabled: bool,
+}
+
+impl Default for AgentHookConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            pretooluse_enabled: true,
+            metadata_enabled: true,
+            stop_enabled: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     pub mode: Mode,
@@ -38,6 +62,8 @@ pub struct Config {
     pub approval_review: ApprovalReviewConfig,
     #[serde(default = "default_true")]
     pub pretooluse_enabled: bool,
+    #[serde(default)]
+    pub agent_hooks: HashMap<String, AgentHookConfig>,
 }
 
 /// 审批 review payload 配置 — 控制 /pending 响应中 review 字段展示哪些内容。
@@ -141,7 +167,13 @@ impl Config {
             relay_url: None,
             approval_review: ApprovalReviewConfig::default(),
             pretooluse_enabled: true,
+            agent_hooks: HashMap::new(),
         }
+    }
+
+    /// 获取指定 agent 的 hook 配置；config 中无该 agent 条目时返回全 true 默认值。
+    pub fn agent_hook_config(&self, agent: &str) -> AgentHookConfig {
+        self.agent_hooks.get(agent).cloned().unwrap_or_default()
     }
 
     pub fn config_path() -> std::path::PathBuf {

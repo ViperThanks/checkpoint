@@ -196,6 +196,10 @@ async function sendBeat() {
     dot.className = 'dot ' + cls;
   }
   if (S.tab === 'home') updateBeatDisplay();
+  // 如果 beat 成功且之前是 offline，触发数据加载恢复
+  if (S.beat.fail_count === 0 && S.beat.status !== 'offline' && S.health.status === 'offline' && S.tab === 'home') {
+    loadHomeDataOnly();
+  }
 }
 
 function updateBeatDisplay() {
@@ -235,14 +239,43 @@ function switchTab(tab) {
 // ============================================================
 // Home tab
 // ============================================================
+async function loadMacStatus() {
+  try {
+    const res = await api('/api/mac-status');
+    const data = await res.json();
+    return data.online === true;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function loadHome() {
   renderHomeLoading();
-  await Promise.allSettled([loadHealthStatus(), loadHomeOverview(), loadHomePending(), loadHomeLastJob()]);
+  const online = await loadMacStatus();
+  if (online) {
+    await Promise.allSettled([loadHealthStatus(), loadHomeOverview(), loadHomePending(), loadHomeLastJob()]);
+  } else {
+    S.health.status = 'offline';
+    S.overview = { conversations: null, total: 0 };
+    S.pending = { events: [], count: 0 };
+    S.lastJob = null;
+    const dot = document.getElementById('status-dot');
+    if (dot) dot.className = 'dot offline';
+  }
   renderHome();
+}
+
+async function loadHomeDataOnly() {
+  await Promise.allSettled([loadHealthStatus(), loadHomeOverview(), loadHomePending(), loadHomeLastJob()]);
+  if (S.tab === 'home') renderHome();
 }
 
 async function loadHomeSilent() {
   if (S.tab !== 'home') return;
+  if (S.beat.status === 'offline') {
+    renderHome();
+    return;
+  }
   await Promise.allSettled([loadHealthStatus(), loadHomeOverview(), loadHomePending(), loadHomeLastJob()]);
   if (S.tab === 'home') renderHome();
 }

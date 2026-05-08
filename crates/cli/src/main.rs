@@ -5,8 +5,8 @@
 //! 每个子命令直接转发到 `commands::cmd_*` 函数。
 
 use agent_aspect_cli::commands::{
-    cmd_audit, cmd_bridge, cmd_conversations, cmd_daemon, cmd_doctor, cmd_init, cmd_launchd,
-    cmd_mode, cmd_rules, cmd_status,
+    cmd_audit, cmd_bridge, cmd_conversations, cmd_daemon, cmd_doctor, cmd_hooks, cmd_init,
+    cmd_launchd, cmd_mode, cmd_rules, cmd_status,
 };
 
 fn main() {
@@ -30,6 +30,7 @@ fn main() {
             args.get(3..).unwrap_or(&[]),
         ),
         "conversations" => cmd_conversations(args.get(2).map(|s| s.as_str())),
+        "hooks" => cmd_hooks(args.get(2..).map(|s| s.join(" ")).as_deref()),
         "help" | "--help" | "-h" => {
             println!("agent-aspect — AI agent behavior monitor");
             println!();
@@ -48,6 +49,7 @@ fn main() {
             println!(
                 "  conversations  Import real titles from provider transcripts (import-titles)"
             );
+            println!("  hooks      Manage hook configuration (status|enable|disable|reconcile)");
         }
         _ => {
             eprintln!("unknown command: {subcommand}");
