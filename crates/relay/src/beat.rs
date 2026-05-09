@@ -45,6 +45,7 @@ pub async fn handle_beat(
     } else {
         body.device_id.clone()
     };
+    let lease = crate::update_mobile_lease(&state, &client.sid, &device_id).await;
 
     let relay_received_at_ms = chrono::Utc::now().timestamp_millis();
 
@@ -147,12 +148,14 @@ pub async fn handle_beat(
             let ack = serde_json::json!({
                 "type": "beat_ack",
                 "request_id": body.request_id,
-                "device_id": body.device_id,
+                "device_id": device_id,
                 "client_sent_at_ms": body.client_sent_at_ms,
                 "relay_received_at_ms": relay_received_at_ms,
                 "bridge_received_at_ms": bridge_received,
                 "bridge_sent_at_ms": bridge_sent,
                 "relay_sent_at_ms": relay_sent_at_ms,
+                "mobile_last_seen_at": lease.last_seen_at,
+                "mobile_lease_expires_at": lease.expires_at,
                 "status": "ok",
             });
             (StatusCode::OK, axum::Json(ack)).into_response()

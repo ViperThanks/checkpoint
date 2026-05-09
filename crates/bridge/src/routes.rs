@@ -357,6 +357,7 @@ pub fn handle_post_password_change(
 pub fn handle_beat() -> tiny_http::ResponseBox {
     let received = chrono::Utc::now().timestamp_millis();
     let sent = chrono::Utc::now().timestamp_millis();
+
     json_response(
         200,
         &serde_json::json!({
@@ -1827,6 +1828,186 @@ pub fn handle_get_overview(
     }
 
     json_response(200, &response_body)
+}
+
+/// GET /mobile/summary — 手机首页轻量摘要。
+///
+/// 将首页需要的最近会话、待审批、最近任务和 hook health 合并到一次 Bridge
+/// 请求内，避免手机端首屏分别拉 `/overview`、`/pending`、`/jobs`、`/hook-status`。
+pub fn handle_get_mobile_summary(ctx: &AppContext) -> tiny_http::ResponseBox {
+    let store = ctx.store.lock().unwrap();
+
+    let conversations = match store.list_conversations(3, 0, None) {
+        Ok(c) => c,
+        Err(e) => {
+            return json_response(
+                500,
+                &serde_json::json!({"error": format!("query conversations: {e}")}),
+            );
+        }
+    };
+    let total = store.count_conversations(None).unwrap_or(0);
+    let conv_ids: Vec<&str> = conversations.iter().map(|c| c.id.as_str()).collect();
+    let counts_map = store
+        .batch_conversation_decision_counts(&conv_ids)
+        .unwrap_or_default();
+    let active_agents: Vec<String> = {
+        let mut agents = std::collections::HashSet::new();
+        for c in &conversations {
+            agents.insert(c.agent.clone());
+        }
+        agents.into_iter().collect()
+    };
+    let convs_json: Vec<serde_json::Value> = conversations
+        .iter()
+        .map(|c| {
+            let (ask_count, deny_count) = counts_map
+                .get(&c.id)
+                .copied()
+                .unwrap_or((c.ask_count, c.deny_count));
+            conversation_to_json_with_counts(c, ask_count, deny_count, &ctx.registry)
+        })
+        .collect();
+
+    let mut config = agent_aspect_core::config::Config::load_or_create();
+    config.approval_review.sanitize();
+    let pending_rows = store
+        .pending_asks(DEFAULT_PENDING_LIMIT)
+        .unwrap_or_default();
+    let pending_events: Vec<serde_json::Value> = pending_rows
+        .into_iter()
+        .map(|d| {
+            let review = build_approval_review(&d, &config.approval_review);
+            serde_json::json!({
+                "event_id": d.event_id,
+                "action": d.action,
+                "rule_id": d.rule_id,
+                "note": d.note,
+                "timestamp": d.timestamp,
+                "tool_name": d.tool_name,
+                "file_path": d.file_path,
+                "device_id": d.device_id,
+                "device_label": d.device_label,
+                "review": review,
+            })
+        })
+        .collect();
+    let pending_count = pending_events.len();
+
+    let last_job = store
+        .list_jobs(1, 0, None)
+        .ok()
+        .and_then(|mut jobs| jobs.pop())
+        .map(|j| mobile_job_summary_json(&store, &j));
+
+    let hook_health = mobile_hook_health_json();
+
+    json_response(
+        200,
+        &serde_json::json!({
+            "status": "ok",
+            "overview": {
+                "conversations": convs_json,
+                "total": total,
+                "active_agents": active_agents,
+            },
+            "pending": {
+                "events": pending_events,
+                "count": pending_count,
+            },
+            "last_job": last_job,
+            "hook_health": hook_health,
+        }),
+    )
+}
+
+/// 手机首页使用的最近任务摘要，保留 completion 可解释字段但不拉日志。
+fn mobile_job_summary_json(
+    store: &AuditStore,
+    j: &agent_aspect_core::audit::JobRow,
+) -> serde_json::Value {
+    let completion = match store.get_observer_by_job_id(&j.id) {
+        Ok(Some(observer)) => serde_json::json!({
+            "observer_id": observer.id,
+            "status": observer.status,
+            "signal": observer.completion_signal,
+            "authority": observer.completion_authority,
+            "reason": observer.completion_reason,
+            "last_activity_at": observer.last_activity_at,
+            "idle_deadline_at": observer.idle_deadline_at,
+            "hard_deadline_at": observer.hard_deadline_at,
+            "cursor_byte_offset": observer.cursor_byte_offset,
+            "last_line_no": observer.last_line_no,
+            "last_line_preview": observer.last_line_preview,
+        }),
+        _ => serde_json::Value::Null,
+    };
+    serde_json::json!({
+        "id": j.id,
+        "kind": j.kind,
+        "status": j.status,
+        "created_at": j.created_at,
+        "started_at": j.started_at,
+        "finished_at": j.finished_at,
+        "provider": j.provider,
+        "project_path": j.project_path,
+        "conversation_id": j.conversation_id,
+        "conversation_db_id": job_conversation_db_id_for_row(j),
+        "prompt": j.prompt,
+        "runner_id": j.runner_id,
+        "heartbeat_at": j.heartbeat_at,
+        "timeout_secs": j.timeout_secs,
+        "failure_reason": j.failure_reason,
+        "last_log_at": j.last_log_at,
+        "stop_requested_at": j.stop_requested_at,
+        "completed_reason": j.completed_reason,
+        "completion": completion,
+        "workflow_id": j.workflow_id,
+    })
+}
+
+/// routes.rs 内部的 job conversation DB ID 计算，避免手机摘要依赖 jobs.rs 私有 helper。
+fn job_conversation_db_id_for_row(j: &agent_aspect_core::audit::JobRow) -> Option<String> {
+    let provider = j.provider.as_deref()?;
+    let conversation_id = j.conversation_id.as_deref()?;
+    if conversation_id.is_empty() {
+        None
+    } else {
+        Some(agent_aspect_core::conversation::conversation_db_id(
+            provider,
+            conversation_id,
+        ))
+    }
+}
+
+/// 将完整 hook-status 压缩为手机首页需要的健康等级。
+fn mobile_hook_health_json() -> serde_json::Value {
+    let config = Config::load_or_create();
+    let hook_binary = paths::hook_binary_path();
+    let status = hook_status::read_full_status(&config, hook_binary.as_ref());
+    let value = serde_json::to_value(&status).unwrap_or_else(|_| serde_json::json!({}));
+    let agents = value
+        .get("agents")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let health = if agents
+        .iter()
+        .any(|a| a.get("legacy_present").and_then(|v| v.as_bool()) == Some(true))
+    {
+        "needs_review"
+    } else if agents.iter().any(|a| {
+        let status = a.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        status != "ok" && status != "disabled"
+    }) {
+        "partial"
+    } else {
+        "ok"
+    };
+    serde_json::json!({
+        "status": health,
+        "agent_count": agents.len(),
+    })
 }
 
 pub fn handle_get_conversations(

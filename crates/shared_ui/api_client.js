@@ -60,7 +60,10 @@ async function api(path, opts) {
     var err = data.error || '';
     console.debug('[api] auth/forbidden:', err || res.status);
     if (err === 'sid_not_registered') {
-      throw { code: 'mac_offline', message: 'Mac 未连接或注册已失效' };
+      throw { code: 'auth_failed', message: '配对已失效，请重新连接' };
+    }
+    if (err === 'token_revoked') {
+      throw { code: 'auth_failed', message: 'Token 已被轮换，请重新连接' };
     }
     if (err === 'wrong_token_role') {
       throw { code: 'auth_failed', message: 'Token 类型错误，请使用 Client Token' };

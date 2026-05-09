@@ -92,7 +92,10 @@ fn relay_client_loop(mut config: RelayConfig) {
                 if was_ready {
                     backoff_secs = 1;
                 }
-                if e.contains("sid_not_registered") {
+                if e.contains("sid_not_registered")
+                    || e.contains("token_expired")
+                    || e.contains("token_revoked")
+                {
                     eprintln!("agent-aspect-bridge: relay rejected token — re-registering");
                     crate::auth::delete_relay_token_files();
                     match crate::auth::ensure_relay_tokens(&config.relay_url) {

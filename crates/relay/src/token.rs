@@ -42,6 +42,9 @@ pub struct TokenPayload {
     pub exp: i64,
     /// 令牌唯一 ID，防止重放。
     pub jti: String,
+    /// client token 轮换代数。旧 token 缺省为 0，仅用于迁移兼容。
+    #[serde(default)]
+    pub generation: u64,
 }
 
 /// 验证通过的令牌，包含解码后的 payload 和原始字符串。
@@ -151,6 +154,7 @@ mod tests {
             iat: now,
             exp: now + exp_offset_secs,
             jti: uuid::Uuid::now_v7().to_string(),
+            generation: 1,
         }
     }
 

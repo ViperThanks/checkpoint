@@ -156,7 +156,37 @@ if [ -n "$MAC_TOKEN" ]; then
 fi
 
 echo ""
-echo "=== test 9: GET /api/pending (not in allowlist, but added) → 503 (no mac) ==="
+echo "=== test 9: POST /api/session/renew rotates client token ==="
+if [ -n "$CLIENT_TOKEN" ]; then
+    OLD_CLIENT_TOKEN="$CLIENT_TOKEN"
+    RENEW_RESP=$(curl -s -X POST \
+        -H "Authorization: Bearer $CLIENT_TOKEN" -H "Content-Type: application/json" \
+        -H "X-Device-Id: smoke-mobile" \
+        -d '{}' \
+        "$RELAY_API/api/session/renew")
+    NEW_CLIENT_TOKEN=$(echo "$RENEW_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin).get('client_token',''))" 2>/dev/null)
+    if [ -n "$NEW_CLIENT_TOKEN" ] && [ "$NEW_CLIENT_TOKEN" != "$OLD_CLIENT_TOKEN" ]; then
+        OLD_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $OLD_CLIENT_TOKEN" \
+            "$RELAY_API/api/overview")
+        NEW_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $NEW_CLIENT_TOKEN" \
+            "$RELAY_API/api/overview")
+        if [ "$OLD_CODE" = "401" ] && [ "$NEW_CODE" = "503" ]; then
+            CLIENT_TOKEN="$NEW_CLIENT_TOKEN"
+            echo "PASS: old token revoked, new token accepted"
+        else
+            echo "FAIL: expected old=401 new=503, got old=$OLD_CODE new=$NEW_CODE"
+            FAILED=1
+        fi
+    else
+        echo "FAIL: renew response invalid: $RENEW_RESP"
+        FAILED=1
+    fi
+fi
+
+echo ""
+echo "=== test 10: GET /api/pending (not in allowlist, but added) → 503 (no mac) ==="
 if [ -n "$CLIENT_TOKEN" ]; then
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
         -H "Authorization: Bearer $CLIENT_TOKEN" \
@@ -173,7 +203,7 @@ if [ -n "$CLIENT_TOKEN" ]; then
 fi
 
 echo ""
-echo "=== test 10: GET /api/run/context (proxied) → 503 (no mac) ==="
+echo "=== test 11: GET /api/run/context (proxied) → 503 (no mac) ==="
 if [ -n "$CLIENT_TOKEN" ]; then
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
         -H "Authorization: Bearer $CLIENT_TOKEN" \
@@ -190,7 +220,7 @@ if [ -n "$CLIENT_TOKEN" ]; then
 fi
 
 echo ""
-echo "=== test 11: GET /api/jobs (proxied) → 503 (no mac) ==="
+echo "=== test 12: GET /api/jobs (proxied) → 503 (no mac) ==="
 if [ -n "$CLIENT_TOKEN" ]; then
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
         -H "Authorization: Bearer $CLIENT_TOKEN" \
@@ -207,7 +237,21 @@ if [ -n "$CLIENT_TOKEN" ]; then
 fi
 
 echo ""
-echo "=== test 12: POST /api/decide (proxied) → 503 (no mac) ==="
+echo "=== test 13: GET /api/mobile/summary (proxied) → 503 (no mac) ==="
+if [ -n "$CLIENT_TOKEN" ]; then
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer $CLIENT_TOKEN" \
+        "$RELAY_API/api/mobile/summary")
+    if [ "$HTTP_CODE" = "503" ]; then
+        echo "PASS"
+    else
+        echo "FAIL: expected 503, got $HTTP_CODE"
+        FAILED=1
+    fi
+fi
+
+echo ""
+echo "=== test 14: POST /api/decide (proxied) → 503 (no mac) ==="
 if [ -n "$CLIENT_TOKEN" ]; then
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
         -H "Authorization: Bearer $CLIENT_TOKEN" -H "Content-Type: application/json" \
@@ -274,7 +318,7 @@ else
         echo "PASS: bridge connected via relay"
 
         echo ""
-        echo "=== test 13: GET /api/health through relay → 200 ==="
+        echo "=== test 15: GET /api/health through relay → 200 ==="
         HEALTH=$(curl -s -H "Authorization: Bearer $BRIDGE_CLIENT_TOKEN" "$RELAY_API/api/health")
         if echo "$HEALTH" | grep -q '"status":"ok"'; then
             echo "PASS"
@@ -284,7 +328,7 @@ else
         fi
 
         echo ""
-        echo "=== test 14: GET /api/overview through relay → 200 ==="
+        echo "=== test 16: GET /api/overview through relay → 200 ==="
         OVERVIEW=$(curl -s -H "Authorization: Bearer $BRIDGE_CLIENT_TOKEN" "$RELAY_API/api/overview?limit=3")
         HAS_CONVERSATIONS=$(echo "$OVERVIEW" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'conversations' in d else 'no')" 2>/dev/null || echo "no")
         if [ "$HAS_CONVERSATIONS" = "yes" ]; then
@@ -295,7 +339,7 @@ else
         fi
 
         echo ""
-        echo "=== test 15: GET /api/pending through relay → 200 ==="
+        echo "=== test 17: GET /api/pending through relay → 200 ==="
         PENDING=$(curl -s -H "Authorization: Bearer $BRIDGE_CLIENT_TOKEN" "$RELAY_API/api/pending")
         HAS_EVENTS=$(echo "$PENDING" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'events' in d else 'no')" 2>/dev/null || echo "no")
         if [ "$HAS_EVENTS" = "yes" ]; then
@@ -306,7 +350,7 @@ else
         fi
 
         echo ""
-        echo "=== test 16: GET /api/run/context through relay → 200 ==="
+        echo "=== test 18: GET /api/run/context through relay → 200 ==="
         CTX=$(curl -s -H "Authorization: Bearer $BRIDGE_CLIENT_TOKEN" "$RELAY_API/api/run/context")
         HAS_PROJECTS=$(echo "$CTX" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'projects' in d else 'no')" 2>/dev/null || echo "no")
         if [ "$HAS_PROJECTS" = "yes" ]; then
@@ -317,7 +361,7 @@ else
         fi
 
         echo ""
-        echo "=== test 17: GET /api/jobs through relay → 200 ==="
+        echo "=== test 19: GET /api/jobs through relay → 200 ==="
         JOBS=$(curl -s -H "Authorization: Bearer $BRIDGE_CLIENT_TOKEN" "$RELAY_API/api/jobs")
         HAS_JOBS=$(echo "$JOBS" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'jobs' in d else 'no')" 2>/dev/null || echo "no")
         if [ "$HAS_JOBS" = "yes" ]; then
@@ -328,7 +372,18 @@ else
         fi
 
         echo ""
-        echo "=== test 18: POST /api/jobs through relay → 200 ==="
+        echo "=== test 20: GET /api/mobile/summary through relay → 200 ==="
+        SUMMARY=$(curl -s -H "Authorization: Bearer $BRIDGE_CLIENT_TOKEN" "$RELAY_API/api/mobile/summary")
+        HAS_SUMMARY=$(echo "$SUMMARY" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'overview' in d and 'pending' in d and 'last_job' in d else 'no')" 2>/dev/null || echo "no")
+        if [ "$HAS_SUMMARY" = "yes" ]; then
+            echo "PASS"
+        else
+            echo "FAIL: missing mobile summary fields: $SUMMARY"
+            FAILED=1
+        fi
+
+        echo ""
+        echo "=== test 21: POST /api/jobs through relay → 200 ==="
         JOB_RESP=$(curl -s -X POST \
             -H "Authorization: Bearer $BRIDGE_CLIENT_TOKEN" -H "Content-Type: application/json" \
             -d '{"kind":"git_status"}' \
@@ -342,7 +397,7 @@ else
         fi
 
         echo ""
-        echo "=== test 19: POST /api/beat-from-mobile through relay → 200 ==="
+        echo "=== test 22: POST /api/beat-from-mobile through relay → 200 ==="
         BEAT_RESP=$(curl -s -X POST \
             -H "Authorization: Bearer $BRIDGE_CLIENT_TOKEN" -H "Content-Type: application/json" \
             -H "X-Device-Id: smoke-mobile" \
@@ -369,7 +424,7 @@ fi
 # ============================================================
 
 echo ""
-echo "=== test 20: POST oversized body (>1 MiB) → rejected ==="
+echo "=== test 23: POST oversized body (>1 MiB) → rejected ==="
 OVERSIZED_BODY=$(python3 -c "print('x' * (1024*1024+1))")
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
     -H "Authorization: Bearer $CLIENT_TOKEN" -H "Content-Type: application/json" \
@@ -383,7 +438,7 @@ else
 fi
 
 echo ""
-echo "=== test 21: Registration rate limit (>10 in 60s) → 429 ==="
+echo "=== test 24: Registration rate limit (>10 in 60s) → 429 ==="
 RATE_HIT=0
 for i in $(seq 1 12); do
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \

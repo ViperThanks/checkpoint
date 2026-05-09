@@ -120,8 +120,12 @@ fn main() {
     // 5.5 启动 transcript scanner 后台线程：定时扫描活跃 observer 的 transcript 增量
     {
         let scanner_db_path = paths::audit_db_path();
+        let scanner_sink = agent_aspect_bridge::completion::CompletionSink::new(
+            ctx.store.clone(),
+            broadcaster.clone(),
+        );
         std::thread::spawn(move || {
-            scanner::start_scanner_loop(scanner_db_path, 5);
+            scanner::start_scanner_loop(scanner_db_path, 5, scanner_sink);
         });
     }
 
@@ -358,6 +362,13 @@ fn main() {
                         routes::json_response(403, &serde_json::json!({"error": "unauthorized"}))
                     } else {
                         routes::handle_get_pending(&ctx)
+                    }
+                }
+                (true, _, "/mobile/summary") => {
+                    if !auth::check_auth(&request, &token) {
+                        routes::json_response(403, &serde_json::json!({"error": "unauthorized"}))
+                    } else {
+                        routes::handle_get_mobile_summary(&ctx)
                     }
                 }
                 (_, true, p) if p.starts_with("/events/") && p.ends_with("/feedback") => {

@@ -269,12 +269,21 @@ async fn wait_for_register(
 
     let sid = verified.payload.sid;
 
-    // sid 必须在已注册名册中（防止已注销的 token 建立 WS）
-    if !state.registered_tokens.lock().await.contains_key(&sid) {
-        eprintln!("agent-aspect-relay: WS register rejected — sid not registered");
-        send_error(ws_sink, "sid_not_registered").await;
-        let _ = ws_sink.close().await;
-        return None;
+    // sid 和 mac_token 原文必须匹配名册，防止已轮换或已注销的旧 token 建立 WS。
+    {
+        let tokens = state.registered_tokens.lock().await;
+        let Some(stored) = tokens.get(&sid) else {
+            eprintln!("agent-aspect-relay: WS register rejected — sid not registered");
+            send_error(ws_sink, "sid_not_registered").await;
+            let _ = ws_sink.close().await;
+            return None;
+        };
+        if stored.mac_token != mac_token {
+            eprintln!("agent-aspect-relay: WS register rejected — mac token revoked");
+            send_error(ws_sink, "token_revoked").await;
+            let _ = ws_sink.close().await;
+            return None;
+        }
     }
 
     Some(sid)

@@ -6,6 +6,7 @@
 const { buildNewJobBody, buildContinueJobBody } = require('../../../shared_ui/job_body.js');
 const { shortId, escHtml, jsStr } = require('../../../shared_ui/view_model.js');
 const { runtimeAlertCard, runtimeHealthBadge } = require('../../../shared_ui/runtime_health.js');
+const { parseJwtExpMs, shouldRenewToken, shouldRunHeavyPoll } = require('./app.js');
 
 // ---- Test runner ----
 
@@ -41,6 +42,11 @@ function assertThrows(fn, label) {
   } catch (_) {
     passed++;
   }
+}
+
+function fakeRelayToken(payload) {
+  var body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return 'cp_rt1.' + body + '.sig';
 }
 
 // ---- buildNewJobBody ----
@@ -206,6 +212,32 @@ console.log('runtime health rendering');
 
 (function test_badge_ok_returns_empty() {
   assertEqual(runtimeHealthBadge({ status: 'ok' }), '', 'ok → no badge');
+})();
+
+// ---- Mobile session lifecycle helpers ----
+
+console.log('mobile session lifecycle helpers');
+
+(function test_parse_jwt_exp_ms() {
+  var token = fakeRelayToken({ ver: 1, sid: 'sid', role: 'client', exp: 2000 });
+  assertEqual(parseJwtExpMs(token), 2000000, 'parseJwtExpMs reads exp seconds as ms');
+})();
+
+(function test_parse_jwt_exp_ms_bad_token() {
+  assertEqual(parseJwtExpMs('bad-token'), null, 'parseJwtExpMs returns null for invalid token');
+})();
+
+(function test_should_renew_token() {
+  var now = 100000;
+  assert(shouldRenewToken(now + 1000, now, 5000), 'renew when inside skew');
+  assert(!shouldRenewToken(now + 10000, now, 5000), 'do not renew when outside skew');
+  assert(!shouldRenewToken(null, now, 5000), 'do not renew without exp');
+})();
+
+(function test_hidden_disables_heavy_poll() {
+  assert(!shouldRunHeavyPoll('hidden', 'online'), 'hidden page must not run heavy poll');
+  assert(!shouldRunHeavyPoll('visible', 'offline'), 'offline state must not run heavy poll');
+  assert(shouldRunHeavyPoll('visible', 'online'), 'visible online page may poll');
 })();
 
 // ---- Summary ----

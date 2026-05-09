@@ -36,3 +36,8 @@ pub const RESUME_FILE_SIZE_WARNING: i64 = 5 * 1024 * 1024;
 pub const RESUME_FILE_SIZE_CRITICAL: i64 = 20 * 1024 * 1024;
 pub const RESUME_MESSAGE_WARNING: i64 = 200;
 pub const RESUME_MESSAGE_CRITICAL: i64 = 1_000;
+
+// Scanner Orphan/Stale 收口
+/// 判定 job heartbeat 为 stale 的最小秒数。
+/// 公式：max(30, poll_interval * 3)，scanner 自行计算实际阈值。
+pub const SCANNER_STALE_HEARTBEAT_MIN_SECS: i64 = 30;

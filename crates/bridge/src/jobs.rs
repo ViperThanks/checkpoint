@@ -411,15 +411,20 @@ impl JobRunner {
             store
                 .insert_job_log(&job_id, "system", "Prompt recorded. Remote execution not yet implemented — stored for future use.", 0, &now2)
                 .map_err(|e| SubmitError::Fatal(format!("log: {e}")))?;
-            store
-                .update_job_finished_with_completed_reason(
-                    &job_id,
-                    "succeeded",
-                    &now2,
-                    Some(0),
-                    None,
-                    Some("process_exit"),
-                )
+            let signal = CompletionSignal {
+                kind: CompletionSignalKind::ProcessExit,
+                authority: agent_aspect_core::lifecycle::CompletionAuthority::Authoritative,
+                outcome: CompletionOutcome::Completed,
+                agent: agent_aspect_core::event::AgentId::ClaudeCode,
+                job_id: Some(job_id.clone()),
+                workflow_id: None,
+                workflow_step_id: None,
+                conversation_id: None,
+                reason: "process_exit".to_string(),
+                observed_at: now2,
+            };
+            self.completion_sink
+                .apply(&signal)
                 .map_err(|e| SubmitError::Fatal(format!("mark finished: {e}")))?;
 
             return Ok(job_id);
@@ -824,9 +829,10 @@ impl JobRunner {
                         kill_stale_process(j.process_group_id, j.pid);
                     }
                 }
-                // DB-level cancel with status guard
-                store
-                    .cancel_job_with_reason(job_id, Some("cancelled by user"))
+                let now = chrono::Utc::now().to_rfc3339();
+                let signal = crate::completion::signal_for_killed(true, job_id, &now);
+                self.completion_sink
+                    .apply(&signal)
                     .map_err(|e| format!("cancel: {e}"))?;
                 Ok(())
             }
@@ -1275,17 +1281,25 @@ fn exec_job(
                  hint: Configure provider_binaries.<name> in ~/.agent-aspect/config.toml \
                  or ensure the binary directory is visible to agent-aspect-bridge"
             );
-            // spawn 失败不走 CompletionSink（job 还没真正开始），直接写 DB
-            let _ = store.update_job_finished_with_completed_reason(
-                job_id,
-                "failed",
-                &now,
-                None,
-                Some("spawn failed"),
-                Some("process_exit_nonzero"),
-            );
             let _ = store.insert_job_log(job_id, "system", &err_msg, 0, &now);
-            sink.broadcast_spawn_failed(job_id);
+            let signal = CompletionSignal {
+                kind: CompletionSignalKind::ProcessExit,
+                authority: agent_aspect_core::lifecycle::CompletionAuthority::Authoritative,
+                outcome: CompletionOutcome::Failed,
+                agent: agent_aspect_core::event::AgentId::ClaudeCode,
+                job_id: Some(job_id.to_string()),
+                workflow_id: None,
+                workflow_step_id: None,
+                conversation_id: None,
+                reason: "spawn failed".to_string(),
+                observed_at: now,
+            };
+            if let Err(apply_err) = sink.apply(&signal) {
+                eprintln!(
+                    "agent-aspect-bridge: job {job_id}: spawn failure sink apply: {apply_err}"
+                );
+                sink.broadcast_spawn_failed(job_id);
+            }
             let _ = completion_tx.take().map(|tx| tx.send(()));
             return;
         }

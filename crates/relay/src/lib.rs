@@ -24,18 +24,41 @@ mod ws;
 
 use serde::{Deserialize, Serialize};
 use session::{SessionRegistry, SharedRegistry};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// 手机端标准心跳间隔（秒），需和 mobile UI 的前台心跳间隔保持一致。
+pub(crate) const MOBILE_HEARTBEAT_INTERVAL_SECS: i64 = 15;
+/// 手机在线租约 TTL（秒）：允许 3 个心跳周期的抖动。
+pub(crate) const MOBILE_LEASE_TTL_SECS: i64 = MOBILE_HEARTBEAT_INTERVAL_SECS * 3;
+
 /// 已注册的令牌对（mac_token + client_token），持久化到 registered_tokens.json。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StoredTokens {
     pub mac_token: String,
+    /// 旧版本持久化的 client token 原文，仅用于启动迁移；保存时不再写出。
+    #[serde(default, skip_serializing)]
     pub client_token: String,
+    /// 当前 client token 的 SHA-256 hash。Relay 只用 hash 做 CAS 和撤销校验。
+    #[serde(default)]
+    pub client_token_hash: String,
+    /// 当前 client token 的轮换代数，必须与 token payload.generation 一致。
+    #[serde(default)]
+    pub client_generation: u64,
     pub label: String,
+    pub expires_at: String,
+}
+
+/// 手机端在线租约，仅保存在内存中。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct MobileLease {
+    pub sid: String,
+    pub device_id: String,
+    pub last_seen_at: String,
     pub expires_at: String,
 }
 
@@ -51,10 +74,86 @@ pub struct AppState {
     pub registered_tokens: Mutex<HashMap<String, StoredTokens>>,
     /// 持久化文件路径。
     pub registered_tokens_path: PathBuf,
+    /// 手机端在线租约：sid + device_id → MobileLease。
+    pub mobile_leases: Mutex<HashMap<String, MobileLease>>,
     /// 注册接口速率限制器（per-IP）。
     pub register_limiter: register::SharedIpRateLimiter,
     /// per-client（per-sid）代理请求速率限制器。
     pub client_limiter: register::SharedClientRateLimiter,
+}
+
+fn mobile_lease_key(sid: &str, device_id: &str) -> String {
+    format!("{sid}\0{device_id}")
+}
+
+/// 计算 client token 的持久化 hash。只用于等值校验，不把原文落盘。
+pub(crate) fn client_token_hash(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// 刷新 sid + device_id 对应的手机端在线租约。
+pub(crate) async fn update_mobile_lease(
+    state: &Arc<AppState>,
+    sid: &str,
+    device_id: &str,
+) -> MobileLease {
+    let now = chrono::Utc::now();
+    let expires_at = now + chrono::Duration::seconds(MOBILE_LEASE_TTL_SECS);
+    let lease = MobileLease {
+        sid: sid.to_string(),
+        device_id: device_id.to_string(),
+        last_seen_at: now.to_rfc3339(),
+        expires_at: expires_at.to_rfc3339(),
+    };
+    state
+        .mobile_leases
+        .lock()
+        .await
+        .insert(mobile_lease_key(sid, device_id), lease.clone());
+    lease
+}
+
+/// 查询手机端在线租约。device_id 缺省时返回该 sid 最新的租约。
+pub(crate) async fn get_mobile_lease(
+    state: &Arc<AppState>,
+    sid: &str,
+    device_id: &str,
+) -> Option<MobileLease> {
+    let leases = state.mobile_leases.lock().await;
+    if device_id != "-" {
+        return leases.get(&mobile_lease_key(sid, device_id)).cloned();
+    }
+    leases
+        .values()
+        .filter(|lease| lease.sid == sid)
+        .max_by_key(|lease| lease.last_seen_at.clone())
+        .cloned()
+}
+
+/// 查询 sid 下所有手机端 lease，按 last_seen_at 倒序返回。
+pub(crate) async fn get_mobile_leases_for_sid(
+    state: &Arc<AppState>,
+    sid: &str,
+) -> Vec<MobileLease> {
+    let mut leases: Vec<MobileLease> = state
+        .mobile_leases
+        .lock()
+        .await
+        .values()
+        .filter(|lease| lease.sid == sid)
+        .cloned()
+        .collect();
+    leases.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at));
+    leases
+}
+
+/// 判断租约在当前时间是否仍有效。
+pub(crate) fn mobile_lease_online(lease: &MobileLease) -> bool {
+    chrono::DateTime::parse_from_rfc3339(&lease.expires_at)
+        .map(|exp| exp.with_timezone(&chrono::Utc) > chrono::Utc::now())
+        .unwrap_or(false)
 }
 
 /// 获取 relay 状态目录（~/.agent-aspect-relay/）。
@@ -95,8 +194,9 @@ pub fn load_registered_tokens_from(path: &Path) -> HashMap<String, StoredTokens>
             std::process::exit(1);
         });
 
-    // 清理过期 token：expires_at 已过的条目直接丢弃
+    // 清理过期 token：expires_at 已过的条目直接丢弃；旧格式原文 token 启动时迁移为 hash。
     let before = tokens.len();
+    let mut migrated = false;
     tokens.retain(
         |sid, item| match chrono::DateTime::parse_from_rfc3339(&item.expires_at) {
             Ok(exp) => exp.with_timezone(&chrono::Utc) > now,
@@ -106,9 +206,25 @@ pub fn load_registered_tokens_from(path: &Path) -> HashMap<String, StoredTokens>
             }
         },
     );
+    for item in tokens.values_mut() {
+        let mut migrated_from_raw = false;
+        if item.client_token_hash.is_empty() && !item.client_token.is_empty() {
+            item.client_token_hash = client_token_hash(&item.client_token);
+            migrated_from_raw = true;
+            migrated = true;
+        }
+        if item.client_generation == 0 && !migrated_from_raw {
+            item.client_generation = 1;
+            migrated = true;
+        }
+        if !item.client_token.is_empty() {
+            item.client_token.clear();
+            migrated = true;
+        }
+    }
 
     // 有条目被清理时重新写入磁盘
-    if tokens.len() != before {
+    if tokens.len() != before || migrated {
         if let Err(e) = save_registered_tokens_to(path, &tokens) {
             eprintln!("agent-aspect-relay: prune expired registered tokens failed: {e}");
             std::process::exit(1);
@@ -283,6 +399,7 @@ pub async fn run_server() {
         setup_token,
         registered_tokens: Mutex::new(registered_tokens),
         registered_tokens_path,
+        mobile_leases: Mutex::new(HashMap::new()),
         register_limiter: Arc::new(Mutex::new(register::IpRateLimiter::new())),
         client_limiter: Arc::new(Mutex::new(register::ClientRateLimiter::new())),
     });
@@ -307,4 +424,36 @@ pub async fn run_server() {
         eprintln!("agent-aspect-relay: server error: {e}");
         std::process::exit(1);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_registered_tokens_migrates_legacy_client_token_without_generation_bump() {
+        let path = std::env::temp_dir().join(format!(
+            "agent-aspect-relay-legacy-token-{}.json",
+            uuid::Uuid::now_v7()
+        ));
+        let raw_client = "legacy-client-token";
+        let body = serde_json::json!({
+            "sid-legacy": {
+                "mac_token": "mac-token",
+                "client_token": raw_client,
+                "label": "legacy",
+                "expires_at": (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339()
+            }
+        });
+        std::fs::write(&path, body.to_string()).expect("write legacy token file");
+
+        let loaded = load_registered_tokens_from(&path);
+        let token = loaded.get("sid-legacy").expect("loaded token");
+        assert_eq!(token.client_token_hash, client_token_hash(raw_client));
+        assert_eq!(token.client_generation, 0);
+        assert!(token.client_token.is_empty());
+
+        let persisted = std::fs::read_to_string(&path).expect("read migrated token file");
+        assert!(!persisted.contains("legacy-client-token"));
+    }
 }

@@ -9,8 +9,16 @@
 // ============================================================
 // State
 // ============================================================
+const HEARTBEAT_INTERVAL_MS = 15000;
+const HIDDEN_HEARTBEAT_INTERVAL_MS = 30000;
+const HOME_POLL_INTERVAL_MS = 30000;
+const TOKEN_RENEW_SKEW_MS = 5 * 60 * 1000;
+const TOKEN_RENEW_RETRY_MS = 60 * 1000;
+
 const S = {
   token: '',
+  tokenExpiresAtMs: null,
+  deviceId: '',
   tab: 'home',
   health: { status: 'loading' }, // loading | online | offline
   overview: { conversations: [], total: 0, active_agents: [] },
@@ -31,10 +39,14 @@ const S = {
   logPollTimer: null,
   homePollTimer: null,
   convDetailPollTimer: null,
+  jobStatusTimer: null,
   convAgentFilter: '', // '' = all, 'claude_code', 'kimi_code', 'codex_cli'
   beat: { rtt_ms: null, status: 'unknown', last_at: null, fail_count: 0 },
   beatTimer: null,
   beatInFlight: false,
+  renewTimer: null,
+  renewInFlight: false,
+  lifecycleBound: false,
   pendingRunPrefill: null, // { provider, projectPath } applied once in renderRun()
   prevTabBeforeDetail: 'convos',
   hookHealth: 'loading', // loading | ok | needs_review | partial
@@ -47,14 +59,78 @@ const S = {
 // ============================================================
 // Auth
 // ============================================================
+function base64UrlDecode(input) {
+  const padded = String(input || '').replace(/-/g, '+').replace(/_/g, '/') +
+    '==='.slice((String(input || '').length + 3) % 4);
+  if (typeof Buffer !== 'undefined') return Buffer.from(padded, 'base64').toString('utf8');
+  return decodeURIComponent(Array.prototype.map.call(atob(padded), function(c) {
+    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+  }).join(''));
+}
+
+function parseJwtExpMs(token) {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length < 3) return null;
+    const payload = JSON.parse(base64UrlDecode(parts[1]));
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function shouldRenewToken(expiresAtMs, nowMs, skewMs) {
+  if (!expiresAtMs) return false;
+  return expiresAtMs - nowMs <= (skewMs || TOKEN_RENEW_SKEW_MS);
+}
+
+function shouldRunHeavyPoll(visibilityState, beatStatus) {
+  return visibilityState !== 'hidden' && beatStatus !== 'offline';
+}
+
+function currentVisibilityState() {
+  if (typeof document === 'undefined') return 'visible';
+  return document.visibilityState || 'visible';
+}
+
+function isPageVisible() {
+  return currentVisibilityState() !== 'hidden';
+}
+
+function getDeviceId() {
+  if (S.deviceId) return S.deviceId;
+  const key = 'relay_mobile_device_id';
+  let saved = '';
+  try { saved = localStorage.getItem(key) || ''; } catch (_) {}
+  if (!saved) {
+    const randomPart = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Date.now().toString(36) + Math.random().toString(36).slice(2);
+    saved = 'mobile-web-' + randomPart;
+    try { localStorage.setItem(key, saved); } catch (_) {}
+  }
+  S.deviceId = saved;
+  return saved;
+}
+
+function storeClientToken(token, expiresAtMs) {
+  S.token = token;
+  S.tokenExpiresAtMs = expiresAtMs || parseJwtExpMs(token);
+  localStorage.setItem('relay_pairing_token', token);
+  if (S.tokenExpiresAtMs) {
+    localStorage.setItem('relay_pairing_token_expires_at', String(S.tokenExpiresAtMs));
+  } else {
+    localStorage.removeItem('relay_pairing_token_expires_at');
+  }
+}
+
 function saveToken() {
   const input = document.getElementById('token-input');
   const btn = input.nextElementSibling;
   const token = input.value.trim();
   if (!token) return;
   if (btn) { btn.disabled = true; btn.textContent = '连接中...'; }
-  S.token = token;
-  localStorage.setItem('relay_pairing_token', token);
+  storeClientToken(token);
   document.getElementById('token-error').textContent = '';
   // Verify token before showing app
   fetch('/api/health', { headers: { 'Authorization': 'Bearer ' + token } })
@@ -76,7 +152,9 @@ function saveToken() {
       if (e.code === 'auth_failed') {
         document.getElementById('token-error').textContent = e.message;
         localStorage.removeItem('relay_pairing_token');
+        localStorage.removeItem('relay_pairing_token_expires_at');
         S.token = '';
+        S.tokenExpiresAtMs = null;
       } else {
         // Network error — proceed optimistically
         document.getElementById('token-form').classList.add('hidden');
@@ -91,6 +169,7 @@ function loadSavedToken() {
   const saved = localStorage.getItem('relay_pairing_token');
   if (saved) {
     S.token = saved;
+    S.tokenExpiresAtMs = Number(localStorage.getItem('relay_pairing_token_expires_at')) || parseJwtExpMs(saved);
     document.getElementById('token-form').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     init();
@@ -100,15 +179,25 @@ function loadSavedToken() {
 function logout() {
   console.debug('[auth] logout — clearing token');
   localStorage.removeItem('relay_pairing_token');
+  localStorage.removeItem('relay_pairing_token_expires_at');
   S.token = '';
+  S.tokenExpiresAtMs = null;
   clearInterval(S.homePollTimer);
   clearInterval(S.convDetailPollTimer);
   clearInterval(S.beatTimer);
+  clearTimeout(S.renewTimer);
   clearTimeout(S.logPollTimer);
+  clearTimeout(S.jobStatusTimer);
+  clearTimeout(S.convLogPollTimer);
+  clearTimeout(S.convDeltaTimer);
   S.homePollTimer = null;
   S.convDetailPollTimer = null;
   S.beatTimer = null;
+  S.renewTimer = null;
   S.logPollTimer = null;
+  S.jobStatusTimer = null;
+  S.convLogPollTimer = null;
+  S.convDeltaTimer = null;
   document.getElementById('app').classList.add('hidden');
   document.getElementById('token-form').classList.remove('hidden');
   document.getElementById('token-input').value = '';
@@ -120,11 +209,130 @@ function logout() {
 // ============================================================
 function init() {
   setTheme(getTheme());
+  getDeviceId();
+  S.tokenExpiresAtMs = S.tokenExpiresAtMs || parseJwtExpMs(S.token);
+  bindLifecycleHandlers();
   checkHealth();
-  loadHome();
+  if (isPageVisible()) loadHome();
   sendBeat();
-  S.homePollTimer = setInterval(loadHomeSilent, 30000);
-  S.beatTimer = setInterval(sendBeat, 15000);
+  startHeavyPollers();
+  restartBeatTimer();
+  scheduleRenew();
+}
+
+function bindLifecycleHandlers() {
+  if (S.lifecycleBound || typeof document === 'undefined') return;
+  S.lifecycleBound = true;
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', handleOnlineResume);
+    window.addEventListener('pageshow', handleOnlineResume);
+  }
+}
+
+function handleVisibilityChange() {
+  restartBeatTimer();
+  if (isPageVisible()) {
+    sendBeat();
+    renewTokenIfNeeded(false);
+    startHeavyPollers();
+    refreshActiveView();
+  } else {
+    stopHeavyPollers();
+  }
+}
+
+function handleOnlineResume() {
+  sendBeat();
+  renewTokenIfNeeded(false);
+  if (isPageVisible()) refreshActiveView();
+}
+
+function refreshActiveView() {
+  if (S.tab === 'home') loadHome();
+  else if (S.tab === 'convos') loadConversations();
+  else if (S.tab === 'run') {
+    if (S.activeJob) {
+      pollJobStatus();
+      pollJobLogs();
+    } else {
+      loadRunContext();
+    }
+  } else if (S.tab === 'conv-detail') {
+    scheduleConvDeltaPoll();
+    if (S.convActiveJob) pollConvJobLogs();
+  } else if (S.tab === 'settings') {
+    renderSettings();
+  }
+}
+
+function startHeavyPollers() {
+  clearInterval(S.homePollTimer);
+  S.homePollTimer = null;
+  if (!isPageVisible()) return;
+  S.homePollTimer = setInterval(loadHomeSilent, HOME_POLL_INTERVAL_MS);
+}
+
+function stopHeavyPollers() {
+  clearInterval(S.homePollTimer);
+  clearTimeout(S.convDeltaTimer);
+  clearTimeout(S.logPollTimer);
+  clearTimeout(S.jobStatusTimer);
+  clearTimeout(S.convLogPollTimer);
+  S.homePollTimer = null;
+  S.convDeltaTimer = null;
+  S.logPollTimer = null;
+  S.jobStatusTimer = null;
+  S.convLogPollTimer = null;
+}
+
+function restartBeatTimer() {
+  clearInterval(S.beatTimer);
+  S.beatTimer = setInterval(sendBeat, isPageVisible() ? HEARTBEAT_INTERVAL_MS : HIDDEN_HEARTBEAT_INTERVAL_MS);
+}
+
+function scheduleRenew(retryDelayMs) {
+  clearTimeout(S.renewTimer);
+  S.renewTimer = null;
+  if (!S.token) return;
+  const now = Date.now();
+  const exp = S.tokenExpiresAtMs || parseJwtExpMs(S.token);
+  S.tokenExpiresAtMs = exp;
+  const delay = retryDelayMs !== undefined
+    ? retryDelayMs
+    : exp ? Math.max(0, exp - now - TOKEN_RENEW_SKEW_MS) : TOKEN_RENEW_RETRY_MS;
+  S.renewTimer = setTimeout(function() { renewTokenIfNeeded(false); }, Math.min(delay, 60 * 60 * 1000));
+}
+
+async function renewTokenIfNeeded(force) {
+  if (S.renewInFlight || !S.token) return false;
+  const exp = S.tokenExpiresAtMs || parseJwtExpMs(S.token);
+  S.tokenExpiresAtMs = exp;
+  if (!force && !shouldRenewToken(exp, Date.now(), TOKEN_RENEW_SKEW_MS)) {
+    scheduleRenew();
+    return false;
+  }
+  S.renewInFlight = true;
+  try {
+    const res = await api('/api/session/renew', {
+      method: 'POST',
+      body: '{}',
+      headers: { 'X-Device-Id': getDeviceId() },
+    });
+    const data = await res.json();
+    const expiresAtMs = Date.parse(data.expires_at) || parseJwtExpMs(data.client_token);
+    storeClientToken(data.client_token, expiresAtMs);
+    scheduleRenew();
+    console.debug('[auth] token renewed');
+    return true;
+  } catch (e) {
+    console.debug('[auth] renew failed:', e.code, e.message);
+    if (e.code === 'auth_failed') showAuthError(e.message);
+    else scheduleRenew(TOKEN_RENEW_RETRY_MS);
+    return false;
+  } finally {
+    S.renewInFlight = false;
+  }
 }
 
 // ============================================================
@@ -164,12 +372,14 @@ async function sendBeat() {
   S.beatInFlight = true;
   const now = Date.now();
   const rid = crypto.randomUUID ? crypto.randomUUID() : now.toString(36) + Math.random().toString(36);
+  const deviceId = getDeviceId();
   try {
     const res = await api('/api/beat-from-mobile', {
       method: 'POST',
+      headers: { 'X-Device-Id': deviceId },
       body: JSON.stringify({
         request_id: rid,
-        device_id: 'mobile-web',
+        device_id: deviceId,
         client_sent_at_ms: now,
       }),
     });
@@ -188,6 +398,7 @@ async function sendBeat() {
     S.beat.fail_count++;
     S.beat.status = S.beat.fail_count >= 3 ? 'offline' : S.beat.status;
     console.debug('[beat] failed (%d): %s', S.beat.fail_count, e.code);
+    if (e.code === 'auth_failed') showAuthError(e.message);
   } finally {
     S.beatInFlight = false;
   }
@@ -199,7 +410,7 @@ async function sendBeat() {
   }
   if (S.tab === 'home') updateBeatDisplay();
   // 如果 beat 成功且之前是 offline，触发数据加载恢复
-  if (S.beat.fail_count === 0 && S.beat.status !== 'offline' && S.health.status === 'offline' && S.tab === 'home') {
+  if (isPageVisible() && S.beat.fail_count === 0 && S.beat.status !== 'offline' && S.health.status === 'offline' && S.tab === 'home') {
     loadHomeDataOnly();
   }
 }
@@ -243,8 +454,13 @@ function switchTab(tab) {
 // ============================================================
 async function loadMacStatus() {
   try {
-    const res = await api('/api/mac-status');
+    const res = await api('/api/mac-status', { headers: { 'X-Device-Id': getDeviceId() } });
     const data = await res.json();
+    S.mobileLease = {
+      online: data.mobile_online === true,
+      last_seen_at: data.mobile_last_seen_at || null,
+      expires_at: data.mobile_lease_expires_at || null,
+    };
     return data.online === true;
   } catch (e) {
     return false;
@@ -255,7 +471,7 @@ async function loadHome() {
   renderHomeLoading();
   const online = await loadMacStatus();
   if (online) {
-    await Promise.allSettled([loadHealthStatus(), loadHomeOverview(), loadHomePending(), loadHomeLastJob(), loadHookStatus()]);
+    await loadHomeSummary();
   } else {
     S.health.status = 'offline';
     S.overview = { conversations: null, total: 0 };
@@ -270,18 +486,43 @@ async function loadHome() {
 }
 
 async function loadHomeDataOnly() {
-  await Promise.allSettled([loadHealthStatus(), loadHomeOverview(), loadHomePending(), loadHomeLastJob(), loadHookStatus()]);
+  await loadHomeSummary();
   if (S.tab === 'home') renderHome();
 }
 
 async function loadHomeSilent() {
+  if (!shouldRunHeavyPoll(currentVisibilityState(), S.beat.status)) return;
   if (S.tab !== 'home') return;
   if (S.beat.status === 'offline') {
     renderHome();
     return;
   }
-  await Promise.allSettled([loadHealthStatus(), loadHomeOverview(), loadHomePending(), loadHomeLastJob()]);
+  await loadHomeSummary();
   if (S.tab === 'home') renderHome();
+}
+
+async function loadHomeSummary() {
+  try {
+    const res = await api('/api/mobile/summary');
+    const data = await res.json();
+    S.health.status = 'online';
+    const dot = document.getElementById('status-dot');
+    if (dot) dot.className = 'dot online';
+    S.overview = data.overview || { conversations: [], total: 0, active_agents: [] };
+    S.pending = data.pending || { events: [], count: 0 };
+    S.pending.count = (S.pending.events || []).length;
+    S.lastJob = data.last_job || null;
+    S.hookHealth = (data.hook_health && data.hook_health.status) || 'loading';
+  } catch (e) {
+    console.debug('[home] summary error:', e.code, e.message);
+    if (e.code === 'mac_offline') {
+      S.health.status = 'offline';
+    }
+    S.overview = { conversations: null, total: 0, _error: e };
+    S.pending = { events: [], count: 0, _error: e };
+    S.lastJob = null;
+    S.hookHealth = 'loading';
+  }
 }
 
 async function loadHealthStatus() {
@@ -792,12 +1033,14 @@ function reconcileLocalOptimisticMessages(fresh) {
 function scheduleConvDeltaPoll() {
   clearTimeout(S.convDeltaTimer);
   if (!S.convDetail) return;
+  if (!shouldRunHeavyPoll(currentVisibilityState(), S.beat.status)) return;
   S.convDeltaTimer = setTimeout(pollConvDelta, S.convActiveJob ? 2000 : 5000);
 }
 
 async function pollConvDelta() {
   const conv = S.convDetail;
   if (!conv) return;
+  if (!shouldRunHeavyPoll(currentVisibilityState(), S.beat.status)) return;
   try {
     const body = document.querySelector('#page-conv-detail .chat-body');
     const shouldFollow = isScrollNearBottom(body);
@@ -1064,6 +1307,7 @@ function updateLocalAssistant(id, text, failed) {
 async function pollConvJobLogs() {
   const job = S.convActiveJob;
   if (!job || !job.id) return;
+  if (!shouldRunHeavyPoll(currentVisibilityState(), S.beat.status)) return;
   try {
     const body = S.convLogCursor ? JSON.stringify({ cursor: S.convLogCursor }) : '{}';
     const res = await api('/api/jobs/' + job.id + '/logs/delta', { method: 'POST', body: body });
@@ -1084,7 +1328,9 @@ async function pollConvJobLogs() {
   } catch (e) {
     console.debug('[conv-logs] error:', e.code);
   }
-  S.convLogPollTimer = setTimeout(pollConvJobLogs, 2000);
+  if (shouldRunHeavyPoll(currentVisibilityState(), S.beat.status)) {
+    S.convLogPollTimer = setTimeout(pollConvJobLogs, 2000);
+  }
 }
 
 function openNewConversationFromDetail() {
@@ -1239,6 +1485,7 @@ async function submitRun() {
 
 async function pollJobStatus() {
   if (!S.activeJob) return;
+  if (!shouldRunHeavyPoll(currentVisibilityState(), S.beat.status)) return;
   try {
     const res = await api('/api/jobs/' + S.activeJob.id);
     const data = await res.json();
@@ -1257,11 +1504,14 @@ async function pollJobStatus() {
   } catch (e) {
     console.debug('[run] poll status error:', e.code);
   }
-  setTimeout(pollJobStatus, 3000);
+  if (shouldRunHeavyPoll(currentVisibilityState(), S.beat.status)) {
+    S.jobStatusTimer = setTimeout(pollJobStatus, 3000);
+  }
 }
 
 async function pollJobLogs() {
   if (!S.activeJob) return;
+  if (!shouldRunHeavyPoll(currentVisibilityState(), S.beat.status)) return;
   try {
     const body = S.logCursor ? JSON.stringify({ cursor: S.logCursor }) : '{}';
     const res = await api('/api/jobs/' + S.activeJob.id + '/logs/delta', {
@@ -1289,7 +1539,9 @@ async function pollJobLogs() {
   } catch (e) {
     console.debug('[run] poll logs error:', e.code);
   }
-  S.logPollTimer = setTimeout(pollJobLogs, 2000);
+  if (shouldRunHeavyPoll(currentVisibilityState(), S.beat.status)) {
+    S.logPollTimer = setTimeout(pollJobLogs, 2000);
+  }
 }
 
 async function cancelJob() {
@@ -1426,7 +1678,11 @@ function skelLines(n) {
 // Boot
 // ============================================================
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {};
+  module.exports = {
+    parseJwtExpMs,
+    shouldRenewToken,
+    shouldRunHeavyPoll,
+  };
 }
 
 if (typeof window !== 'undefined') {

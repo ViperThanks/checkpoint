@@ -32,6 +32,7 @@ const ALLOWED_GET_PATHS: &[&str] = &[
     "/conversations",
     "/workflows",
     "/hook-status",
+    "/mobile/summary",
 ];
 
 /// 允许代理的 GET 路径前缀（前缀匹配）。
@@ -61,9 +62,52 @@ pub async fn handle_mac_status(
     client: VerifiedClient,
 ) -> Response {
     let online = state.registry.lock().await.is_online(&client.sid);
+    let leases = crate::get_mobile_leases_for_sid(&state, &client.sid).await;
+    let lease = crate::get_mobile_lease(&state, &client.sid, &client.device_id)
+        .await
+        .or_else(|| leases.first().cloned());
+    let mobile_devices: Vec<serde_json::Value> = leases
+        .iter()
+        .map(|lease| {
+            serde_json::json!({
+                "device_id": lease.device_id,
+                "last_seen_at": lease.last_seen_at,
+                "expires_at": lease.expires_at,
+                "online": crate::mobile_lease_online(lease),
+            })
+        })
+        .collect();
+    let mobile_online_count = leases
+        .iter()
+        .filter(|lease| crate::mobile_lease_online(lease))
+        .count();
+    let (mobile_last_seen_at, mobile_lease_expires_at, mobile_online, mobile_device_id) =
+        if let Some(lease) = lease {
+            (
+                serde_json::Value::String(lease.last_seen_at.clone()),
+                serde_json::Value::String(lease.expires_at.clone()),
+                crate::mobile_lease_online(&lease),
+                serde_json::Value::String(lease.device_id),
+            )
+        } else {
+            (
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                false,
+                serde_json::Value::String(client.device_id.clone()),
+            )
+        };
     (
         StatusCode::OK,
-        axum::Json(serde_json::json!({"online": online})),
+        axum::Json(serde_json::json!({
+            "online": online,
+            "mobile_online": mobile_online,
+            "mobile_last_seen_at": mobile_last_seen_at,
+            "mobile_lease_expires_at": mobile_lease_expires_at,
+            "mobile_device_id": mobile_device_id,
+            "mobile_online_count": mobile_online_count,
+            "mobile_devices": mobile_devices,
+        })),
     )
         .into_response()
 }
