@@ -25,6 +25,7 @@
 | 文件 | 职责 |
 |------|------|
 | `PLAN.md` | 产品宪法：愿景、架构、阶段路线和事件模型 |
+| `shared-ui-inventory-m49.md` | M49 shared_ui inventory：记录已收敛的前端产品原语、暂不迁移边界和后续抽象规则 |
 | `plan-m48-product-architecture-roadmap.md` | M48+ 产品化与架构长期路线图：手机控制面、UI 产品层、Provider SDK、Hook 策略配置、编排高可用、软件化运维 |
 | `plan-m47-completion-strategy-layer.md` | M47 完成判定策略层计划：PreToolUse 边缘化、stop hook / process exit / transcript scanner / timeout 统一成 completion signal |
 | `plan-m43-conversation-review-ux.md` | M43 会话审阅体验计划：选区残留修复、thinking 折叠结构化、审批 review payload 可配置化 |
@@ -109,6 +110,7 @@
 | `render.js` | Markdown 渲染和复制按钮：封装 marked + 代码块复制 |
 | `api_client.js` | HTTP client 封装：token、JSON 解析、错误规范化 |
 | `job_body.js` | job body 唯一构造源：new 永不含 conversation_id，continue 缺 id 必须抛错 |
+| `job_status.js` | job 状态和 completion 文案展示原语：Bridge/Relay 共用 status label、badge、terminal 判断和 completion detail |
 | `runtime_health.js` | runtime drift / health 的 badge、banner、首页告警渲染 |
 | `activity_segment.js` | 活动时间线 view model：连续工具事件合并、`Worked for Xm Ys` 摘要、可展开详情 |
 | `approval_review.js` | 审批 review 统一渲染：后端生成 review payload → 前端 `renderApprovalReview` / `renderApprovalReviewCompact` 渲染，桥端/移动端复用 |

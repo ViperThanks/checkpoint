@@ -145,10 +145,9 @@ function renderHomeJobs(job) {
   if (!job) {
     return emptyState('暂无任务', '在 Run 标签提交任务');
   }
-  const bc = job.status === 'succeeded' ? 'allow' : job.status === 'failed' ? 'deny' : job.status === 'cancelled' ? 'deny' : 'ask';
   let h = '<div class="job-item" onclick="switchTab(\'run\');if(typeof viewJob===\'function\')viewJob(\'' + jsStr(job.id) + '\')">';
   h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">';
-  h += badge(bc, STATUS_LABELS[job.status] || job.status);
+  h += renderBridgeJobBadge(job.status);
   h += '<span style="font-weight:600;font-size:.88rem">' + esc(jobKindLabel(job.kind)) + '</span>';
   h += '</div>';
   h += '<div class="job-meta">' + ago(job.created_at) + '</div>';

@@ -342,32 +342,6 @@ function humanFailureReason(reason) {
   return reason;
 }
 
-function humanCompletedReason(reason) {
-  if (!reason) return '';
-  if (reason === 'stop_hook') return 'stop hook';
-  if (reason === 'process_exit') return '进程退出';
-  if (reason === 'scanner_timeout' || reason === 'timeout_killed') return '超时';
-  if (reason === 'process_exit_nonzero') return '进程异常';
-  return reason;
-}
-
-function cleanCompletionName(value) {
-  if (!value) return '';
-  return String(value).replace(/^"|"$/g, '');
-}
-
-function humanCompletionDetail(completion) {
-  if (!completion) return '';
-  const parts = [];
-  const signal = cleanCompletionName(completion.signal);
-  const authority = cleanCompletionName(completion.authority);
-  if (signal) parts.push(signal);
-  if (authority) parts.push(authority);
-  if (completion.last_activity_at) parts.push('activity ' + relTime(completion.last_activity_at));
-  if (completion.hard_deadline_at) parts.push('deadline ' + relTime(completion.hard_deadline_at));
-  return parts.join(' · ');
-}
-
 function bindActiveChatJob(jobId) {
   RS.chatMessages.forEach(function (m) {
     if (m.id === RS.activeAssistantMessageId || m.id === RS.activeUserMessageId) {
@@ -474,17 +448,17 @@ function showJobActive(id, kind, status) {
 function updateJobStatusBadge(status, completedReason, completion) {
   const badgeEl = document.getElementById('job-status-badge');
   if (!badgeEl) return;
-  badgeEl.textContent = STATUS_LABELS[status] || status;
+  const view = jobStatusView(status);
+  badgeEl.textContent = view.label;
   badgeEl.className = 'badge';
-  if (status === 'succeeded') badgeEl.classList.add('badge-allow');
-  else if (status === 'failed' || status === 'cancelled' || status === 'timeout') badgeEl.classList.add('badge-deny');
-  else if (status === 'running' || status === 'queued' || status === 'observing') badgeEl.classList.add('badge-ask');
+  badgeEl.style.background = '';
+  if (view.bridgeType) badgeEl.classList.add('badge-' + view.bridgeType);
   else badgeEl.style.background = 'var(--surface3)';
   var crEl = document.getElementById('job-completed-reason');
   if (crEl) {
     var crText = humanCompletedReason(completedReason);
     var detail = humanCompletionDetail(completion);
-    if ((crText || detail) && (status === 'succeeded' || status === 'failed' || status === 'cancelled' || status === 'timeout')) {
+    if ((crText || detail) && terminalJobStatus(status)) {
       crEl.textContent = [crText, detail].filter(Boolean).join(' · ');
       crEl.classList.remove('hidden');
     } else {
@@ -659,10 +633,9 @@ function loadJobHistory() {
       return;
     }
     list.innerHTML = jobs.map(function (j) {
-      const bc = j.status === 'succeeded' ? 'allow' : j.status === 'failed' || j.status === 'cancelled' ? 'deny' : j.status === 'running' || j.status === 'observing' ? 'ask' : '';
       let h = '<div class="job-history-item" onclick="viewJob(\'' + jsStr(j.id) + '\')">' +
         '<div class="job-history-top">' +
-        badge(bc, STATUS_LABELS[j.status] || j.status) +
+        renderBridgeJobBadge(j.status) +
         '<span class="job-history-kind">' + esc(jobKindLabel(j.kind)) + '</span>' +
         '<span class="job-history-time">' + ago(j.created_at) + '</span></div>';
       if (j.project_path || j.provider || j.prompt) {

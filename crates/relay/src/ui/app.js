@@ -4,7 +4,7 @@
 // buildNewJobBody / buildContinueJobBody，不允许在 submit 函数中
 // 自行拼装 body object。
 //
-// 业务原语来源：job_body.js（由 mobile_ui.rs 在本文件之前注入）
+// 业务原语来源：job_body.js / job_status.js（由 mobile_ui.rs 在本文件之前注入）
 
 // ============================================================
 // State
@@ -728,43 +728,17 @@ function renderHomeJobCard() {
   if (!job) {
     body = '<div style="color:#666;font-size:13px">暂无任务</div>';
   } else {
-    const statusBadge = jobBadge(job.status);
+    const statusBadge = renderJobBadge(job.status);
     const prompt = job.prompt || job.kind || '';
-    var cr = job.completed_reason ? humanCompletedReason(job.completed_reason) : '';
+    var cr = job.completed_reason ? humanCompletedReason(job.completed_reason, { completedPrefix: true }) : '';
     body = '<div class="status-row">' + statusBadge +
       '<span class="status-value">' + escHtml(trunc(prompt, 60)) + '</span></div>';
     var detail = humanCompletionDetail(job.completion);
-    if ((cr || detail) && (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled' || job.status === 'timeout')) {
+    if ((cr || detail) && terminalJobStatus(job.status)) {
       body += '<div style="font-size:11px;color:#888;margin-top:4px">' + escHtml([cr, detail].filter(Boolean).join(' · ')) + '</div>';
     }
   }
   return '<div class="card"><div class="card-title">最近任务</div>' + body + '</div>';
-}
-
-function humanCompletedReason(reason) {
-  if (!reason) return '';
-  if (reason === 'stop_hook') return '已完成：stop hook';
-  if (reason === 'process_exit') return '已完成：进程退出';
-  if (reason === 'scanner_timeout' || reason === 'timeout_killed') return '超时';
-  if (reason === 'process_exit_nonzero') return '进程异常';
-  return reason;
-}
-
-function cleanCompletionName(value) {
-  if (!value) return '';
-  return String(value).replace(/^"|"$/g, '');
-}
-
-function humanCompletionDetail(completion) {
-  if (!completion) return '';
-  var parts = [];
-  var signal = cleanCompletionName(completion.signal);
-  var authority = cleanCompletionName(completion.authority);
-  if (signal) parts.push(signal);
-  if (authority) parts.push(authority);
-  if (completion.last_activity_at) parts.push('activity ' + relTime(completion.last_activity_at));
-  if (completion.hard_deadline_at) parts.push('deadline ' + relTime(completion.hard_deadline_at));
-  return parts.join(' · ');
 }
 
 // ============================================================
@@ -1493,7 +1467,7 @@ async function pollJobStatus() {
     const badge = document.getElementById('run-status-badge');
     if (badge) {
       var detail = humanCompletionDetail(data.completion);
-      badge.innerHTML = jobBadge(data.status) + (detail ? '<span style="font-size:11px;color:#888;margin-left:6px">' + escHtml(detail) + '</span>' : '');
+      badge.innerHTML = renderJobBadge(data.status) + (detail ? '<span style="font-size:11px;color:#888;margin-left:6px">' + escHtml(detail) + '</span>' : '');
     }
     console.debug('[run] job status:', data.status);
     if (data.status === 'succeeded' || data.status === 'failed' || data.status === 'cancelled' || data.status === 'timeout') {
@@ -1533,7 +1507,7 @@ async function pollJobLogs() {
     }
     if (data.status && data.status !== 'running' && data.status !== 'queued') {
       const badge = document.getElementById('run-status-badge');
-      if (badge) badge.innerHTML = jobBadge(data.status);
+      if (badge) badge.innerHTML = renderJobBadge(data.status);
       return;
     }
   } catch (e) {
@@ -1551,7 +1525,7 @@ async function cancelJob() {
     await api('/api/jobs/' + S.activeJob.id + '/cancel', { method: 'POST' });
     console.debug('[run] cancel submitted');
     const badge = document.getElementById('run-status-badge');
-    if (badge) badge.innerHTML = jobBadge('cancelled');
+    if (badge) badge.innerHTML = renderJobBadge('cancelled');
     const cancelBtn = document.getElementById('run-cancel-btn');
     if (cancelBtn) cancelBtn.classList.add('hidden');
   } catch (e) {
@@ -1576,7 +1550,7 @@ async function loadRunHistory() {
         return '<div class="conv-item">' +
           '<div class="conv-header">' +
           '<span class="conv-title">' + escHtml(trunc(prompt, 50)) + '</span>' +
-          jobBadge(j.status) +
+          renderJobBadge(j.status) +
           '</div>' +
           (detail ? '<div class="conv-meta">' + escHtml(detail) + '</div>' : '') +
           '</div>';
@@ -1632,20 +1606,6 @@ function renderSettings() {
 }
 
 // escHtml, jsStr, trunc, agentLabel, shortProject, shortId, relTime — 来自 shared_ui/view_model.js
-
-function jobBadge(status) {
-  const map = {
-    'queued': ['badge-yellow', '排队中'],
-    'running': ['badge-blue', '运行中'],
-    'succeeded': ['badge-green', '成功'],
-    'failed': ['badge-red', '失败'],
-    'cancelled': ['badge-gray', '已取消'],
-    'timeout': ['badge-red', '空闲超时'],
-    'observing': ['badge-orange', '等待返回'],
-  };
-  const [cls, label] = map[status] || ['badge-gray', status || '未知'];
-  return '<span class="badge ' + cls + '">' + label + '</span>';
-}
 
 function emptyReason(data) {
   if (data && data._error) {

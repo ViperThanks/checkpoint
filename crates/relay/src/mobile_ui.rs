@@ -7,7 +7,7 @@
 //! 不变量：
 //! - JS 注入顺序：shared_ui 层 → relay shell 层。
 //!   顺序不可颠倒，shell 层依赖 shared_ui 层中定义的全局函数。
-//! - shared_ui 模块：marked → view_model → render → api_client → job_body → runtime_health → activity_segment
+//! - shared_ui 模块：marked → view_model → render → api_client → job_body → job_status → runtime_health → activity_segment
 
 use axum::body::Body;
 use axum::http::{StatusCode, header};
@@ -23,6 +23,7 @@ const VIEW_MODEL_JS: &str = include_str!("../../shared_ui/view_model.js");
 const RENDER_JS: &str = include_str!("../../shared_ui/render.js");
 const API_CLIENT_JS: &str = include_str!("../../shared_ui/api_client.js");
 const JOB_BODY_JS: &str = include_str!("../../shared_ui/job_body.js");
+const JOB_STATUS_JS: &str = include_str!("../../shared_ui/job_status.js");
 const RUNTIME_HEALTH_JS: &str = include_str!("../../shared_ui/runtime_health.js");
 const ACTIVITY_SEGMENT_JS: &str = include_str!("../../shared_ui/activity_segment.js");
 const APPROVAL_REVIEW_JS: &str = include_str!("../../shared_ui/approval_review.js");
@@ -45,6 +46,8 @@ pub async fn serve_ui() -> Response {
         + "\n"
         + JOB_BODY_JS
         + "\n"
+        + JOB_STATUS_JS
+        + "\n"
         + RUNTIME_HEALTH_JS
         + "\n"
         + ACTIVITY_SEGMENT_JS
@@ -56,7 +59,7 @@ pub async fn serve_ui() -> Response {
         + env!("CARGO_PKG_VERSION")
         + " build="
         + env!("BUILD_TIME")
-        + " shell=relay loaded=marked,view_model,render,api_client,job_body,runtime_health,activity_segment,approval_review');\n";
+        + " shell=relay loaded=marked,view_model,render,api_client,job_body,job_status,runtime_health,activity_segment,approval_review');\n";
     let html = HTML_TEMPLATE
         .replace("/*__CSS__*/", &(DESIGN_TOKENS_CSS.to_string() + "\n" + CSS))
         .replace("/*__JS__*/", &js)
