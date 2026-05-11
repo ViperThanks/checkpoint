@@ -147,6 +147,35 @@ function agentLabel(agent) {
 }
 
 // ============================================================
+// 权限模式标签
+// ============================================================
+
+/**
+ * 将 provider/runtime 原生权限值转成人类可读标签。
+ * 不变量：只负责展示，不改变 API 与数据库中的 canonical 值。
+ *
+ * @param {string} mode
+ * @returns {string}
+ */
+function permissionModeLabel(mode) {
+  if (!mode) return '';
+  var raw = String(mode).trim();
+  var key = raw.toLowerCase().replace(/_/g, '-');
+  if (
+    key === 'bypasspermissions' ||
+    key === 'bypass-permissions' ||
+    key === 'bypass' ||
+    key === 'full' ||
+    key === 'full-access' ||
+    key === 'danger-full-access'
+  ) return 'Full Access';
+  if (key === 'workspace-write' || key === 'workspacewrite') return 'Workspace Write';
+  if (key === 'read-only' || key === 'readonly') return 'Read Only';
+  if (key === 'default' || key === 'on-request' || key === 'ask') return 'Default';
+  return raw;
+}
+
+// ============================================================
 // 项目路径
 // ============================================================
 
@@ -287,6 +316,7 @@ if (typeof module !== 'undefined' && module.exports) {
     relTime: relTime,
     ago: ago,
     agentLabel: agentLabel,
+    permissionModeLabel: permissionModeLabel,
     shortProject: shortProject,
     projectBasename: projectBasename,
     toast: toast,

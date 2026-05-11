@@ -1,9 +1,10 @@
 // view_model_test.js — 共享 view_model 模块测试
 //
-// 验证 escHtml, jsStr, shortId, trunc, formatTime, relTime, agentLabel, cleanAgentLogChunk。
+// 验证 escHtml, jsStr, shortId, trunc, formatTime, relTime, agentLabel,
+// permissionModeLabel, cleanAgentLogChunk。
 
 const {
-  escHtml, jsStr, shortId, trunc, formatTime, relTime, agentLabel,
+  escHtml, jsStr, shortId, trunc, formatTime, relTime, agentLabel, permissionModeLabel,
   shortProject, projectBasename, cleanAgentLogChunk,
 } = require('../view_model.js');
 
@@ -99,6 +100,20 @@ console.log('agentLabel');
   assertEqual(agentLabel('unknown_agent'), 'unknown_agent', 'unknown passthrough');
   assertEqual(agentLabel(''), '未知', 'empty → 未知');
   assertEqual(agentLabel(null), '未知', 'null → 未知');
+})();
+
+// ---- permissionModeLabel ----
+
+console.log('permissionModeLabel');
+
+(function test_permission_mode_labels() {
+  assertEqual(permissionModeLabel('bypassPermissions'), 'Full Access', 'bypassPermissions');
+  assertEqual(permissionModeLabel('danger-full-access'), 'Full Access', 'danger full access');
+  assertEqual(permissionModeLabel('workspace_write'), 'Workspace Write', 'workspace_write');
+  assertEqual(permissionModeLabel('read-only'), 'Read Only', 'read only');
+  assertEqual(permissionModeLabel('default'), 'Default', 'default');
+  assertEqual(permissionModeLabel('unknown'), 'unknown', 'unknown passthrough');
+  assertEqual(permissionModeLabel(''), '', 'empty');
 })();
 
 // ---- shortProject ----

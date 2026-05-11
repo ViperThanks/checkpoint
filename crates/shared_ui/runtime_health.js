@@ -15,6 +15,7 @@ if (typeof module !== 'undefined' && module.exports) {
   var vm = require('./view_model.js');
   var escHtml = vm.escHtml;
   var jsStr = vm.jsStr;
+  var permissionModeLabel = vm.permissionModeLabel;
 }
 
 // ============================================================
@@ -98,10 +99,27 @@ function runtimeHealthSummary(health) {
   if (!warnings.length) return '';
   return '<div class="runtime-summary">' + warnings.map(function (w) {
     var field = w.field || 'runtime';
-    var oldVal = w.expected || w.stored || '-';
+    var oldVal = w.expected || w.stored || w.recorded || '-';
     var newVal = w.actual || w.current || '-';
+    oldVal = formatRuntimeValue(field, oldVal);
+    newVal = formatRuntimeValue(field, newVal);
     return escHtml(field + ': ' + oldVal + ' → ' + newVal);
   }).join('<br>') + '</div>';
+}
+
+/**
+ * 根据字段类型格式化 runtime 值。
+ *
+ * @param {string} field
+ * @param {string} value
+ * @returns {string}
+ */
+function formatRuntimeValue(field, value) {
+  var key = String(field || '').toLowerCase();
+  if (key === 'permission_mode' || key === 'permissionmode') {
+    return typeof permissionModeLabel === 'function' ? permissionModeLabel(value) : value;
+  }
+  return value;
 }
 
 // ============================================================
@@ -120,8 +138,10 @@ function driftText(health) {
   if (!warnings.length) return '检测到运行环境不一致。';
   return warnings.map(function (w) {
     var field = w.field || 'runtime';
-    var oldVal = w.expected || w.stored || '-';
+    var oldVal = w.expected || w.stored || w.recorded || '-';
     var newVal = w.actual || w.current || '-';
+    oldVal = formatRuntimeValue(field, oldVal);
+    newVal = formatRuntimeValue(field, newVal);
     return field + ': ' + oldVal + ' → ' + newVal;
   }).join('\n');
 }
@@ -167,6 +187,7 @@ if (typeof module !== 'undefined' && module.exports) {
     runtimeAlertCard: runtimeAlertCard,
     runtimeHealthBanner: runtimeHealthBanner,
     runtimeHealthSummary: runtimeHealthSummary,
+    formatRuntimeValue: formatRuntimeValue,
     driftText: driftText,
     parseRuntimeHealth: parseRuntimeHealth,
     confirmRuntimeDrift: confirmRuntimeDrift,

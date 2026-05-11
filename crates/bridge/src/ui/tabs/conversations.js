@@ -250,7 +250,7 @@ function loadConvDetail() {
         identityChips = '<div class="identity-chips">';
         if (rh.model_id) identityChips += '<span class="id-chip">模型: ' + esc(rh.model_id) + '</span>';
         if (rh.runtime_profile) identityChips += '<span class="id-chip">Profile: ' + esc(rh.runtime_profile) + '</span>';
-        if (rh.permission_mode && rh.permission_mode !== 'unknown') identityChips += '<span class="id-chip">权限: ' + esc(rh.permission_mode === 'bypassPermissions' ? 'bypass' : rh.permission_mode) + '</span>';
+        if (rh.permission_mode && rh.permission_mode !== 'unknown') identityChips += '<span class="id-chip">权限: ' + esc(permissionModeLabel(rh.permission_mode)) + '</span>';
         identityChips += '</div>';
       }
       header.innerHTML =

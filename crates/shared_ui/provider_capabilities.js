@@ -13,6 +13,7 @@
     if (caps.supports_posttooluse) labels.push('After');
     if (caps.supports_stop) labels.push('Stop');
     if (caps.supports_native_timeout) labels.push('Native timeout');
+    if (caps.supports_permission_passthrough) labels.push('Full Access');
     return labels;
   }
 

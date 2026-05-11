@@ -26,7 +26,8 @@ console.log('providerCapabilityLabels');
     supports_posttooluse: true,
     supports_stop: true,
     supports_native_timeout: true,
-  }), ['可继续', 'Transcript', 'Before', 'After', 'Stop', 'Native timeout'], 'full capabilities');
+    supports_permission_passthrough: true,
+  }), ['可继续', 'Transcript', 'Before', 'After', 'Stop', 'Native timeout', 'Full Access'], 'full capabilities');
 })();
 
 (function test_minimal_capabilities() {

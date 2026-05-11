@@ -33,6 +33,8 @@ pub struct ProviderCapabilities {
     pub supports_new: bool,
     /// 是否支持 provider 自带 timeout 控制。
     pub supports_native_timeout: bool,
+    /// 是否支持运行时权限透传（Full Access）。
+    pub supports_permission_passthrough: bool,
 }
 
 /// 单个 provider 的静态配置。
@@ -329,6 +331,7 @@ impl ProviderRegistry {
             supports_resume: c.supports_resume,
             supports_new: c.supports_new,
             supports_native_timeout: c.supports_native_timeout,
+            supports_permission_passthrough: c.supports_permission_passthrough,
         })
     }
 
@@ -418,6 +421,7 @@ mod tests {
         assert!(codex.supports_transcript);
         assert!(codex.supports_resume);
         assert!(codex.supports_new);
+        assert!(codex.supports_permission_passthrough);
         assert!(r.can_start_new("codex_cli"));
         assert!(!r.can_start_new("nonexistent"));
     }

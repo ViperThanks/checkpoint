@@ -104,8 +104,8 @@ console.log('runtimeHealthBanner (fixture)');
   assertContains(result, 'runtime-critical', 'contains runtime-critical class');
   assertContains(result, '运行环境已漂移', 'contains drift warning text');
   assertContains(result, 'permissionMode', 'shows drifted field name');
-  assertContains(result, 'bypassPermissions', 'shows expected value');
-  assertContains(result, 'default', 'shows actual value');
+  assertContains(result, 'Full Access', 'shows expected value');
+  assertContains(result, 'Default', 'shows actual value');
 })();
 
 (function test_ok_conv_no_banner() {
@@ -139,8 +139,8 @@ console.log('driftText');
   };
   const result = driftText(health);
   assertContains(result, 'permissionMode', 'drift text contains field');
-  assertContains(result, 'bypassPermissions', 'drift text contains expected');
-  assertContains(result, 'default', 'drift text contains actual');
+  assertContains(result, 'Full Access', 'drift text contains expected');
+  assertContains(result, 'Default', 'drift text contains actual');
 })();
 
 (function test_drift_text_no_warnings() {

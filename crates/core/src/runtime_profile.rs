@@ -7,8 +7,8 @@
 //! - identity 持久化到 conversations 表（DAO 在 conversations.rs）
 //!
 //! 探测策略（按可靠性递减）：
-//! 1. 环境变量（ANTHROPIC_MODEL / OPENAI_MODEL 等）
-//! 2. provider CLI config 文件（~/.claude.json / ~/.config/codex/config.toml 等）
+//! 1. 环境变量（ANTHROPIC_MODEL / OPENAI_MODEL / CODEX_* 等）
+//! 2. provider CLI config 文件（~/.claude.json / ~/.codex/config.toml 等）
 //! 3. ccswitch profile（如果 ~/.ccswitch/ 存在）
 //! 4. 回退到 "unknown"
 
@@ -236,8 +236,8 @@ fn probe_codex_cli(workspace_path: Option<&str>) -> RuntimeIdentity {
         .or_else(|_| std::env::var("CODEX_MODEL"))
         .unwrap_or_else(|_| "unknown".to_string());
 
-    let config_hash = hash_file(&home_path(".config/codex/config.toml"))
-        .or_else(|| hash_file(&home_path(".codex/config.toml")));
+    let config_hash = codex_config_paths().iter().find_map(|path| hash_file(path));
+    let permission_mode = detect_codex_permission_mode(workspace_path);
     let entrypoint = which_binary("codex");
     let toolchain_fingerprint = compute_toolchain_fingerprint("codex");
 
@@ -246,7 +246,7 @@ fn probe_codex_cli(workspace_path: Option<&str>) -> RuntimeIdentity {
         profile_name: "default".to_string(),
         workspace_path: workspace_path.map(|s| s.to_string()),
         config_hash,
-        permission_mode: "unknown".to_string(),
+        permission_mode,
         entrypoint,
         toolchain_fingerprint,
     }
@@ -321,6 +321,120 @@ fn detect_claude_permission_mode() -> String {
     } else {
         "default".to_string()
     }
+}
+
+/// 检测 Codex CLI 的 permission_mode。
+///
+/// 优先读显式环境变量；其次解析 Codex config 中的 sandbox_mode 或项目 trust_level。
+/// Codex trusted project 在当前桌面环境等价于 full access，统一落到内部 canonical
+/// `bypassPermissions`，让 runtime drift 逻辑与 Claude Code 共用同一套判定。
+fn detect_codex_permission_mode(workspace_path: Option<&str>) -> String {
+    let env_keys = [
+        "CODEX_PERMISSION_MODE",
+        "CODEX_SANDBOX_MODE",
+        "CODEX_SANDBOX",
+        "CODEX_FULL_ACCESS",
+    ];
+    for key in env_keys {
+        if let Ok(value) = std::env::var(key) {
+            if let Some(mode) = normalize_permission_mode(&value) {
+                return mode;
+            }
+        }
+    }
+
+    for path in codex_config_paths() {
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(mode) = codex_permission_mode_from_config(&content, workspace_path) {
+            return mode;
+        }
+    }
+
+    "unknown".to_string()
+}
+
+/// 将 provider 原生权限名归一到 Agent Aspect 内部权限语义。
+fn normalize_permission_mode(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let key = trimmed.to_ascii_lowercase().replace('_', "-");
+    match key.as_str() {
+        "1" | "true" | "yes" | "full" | "full-access" | "danger-full-access" | "bypass"
+        | "bypasspermissions" | "bypass-permissions" => {
+            Some(crate::constants::PERMISSION_MODE_BYPASS.to_string())
+        }
+        "0" | "false" | "no" | "default" | "on-request" | "ask" => Some("default".to_string()),
+        "read-only" | "readonly" => Some("read-only".to_string()),
+        "workspace-write" | "workspacewrite" => Some("workspace-write".to_string()),
+        "unknown" => Some("unknown".to_string()),
+        _ => None,
+    }
+}
+
+/// 从 Codex config.toml 中解析权限模式。
+fn codex_permission_mode_from_config(
+    content: &str,
+    workspace_path: Option<&str>,
+) -> Option<String> {
+    let value: toml::Value = content.parse().ok()?;
+
+    if let Some(mode) = value.get("sandbox_mode").and_then(|v| v.as_str()) {
+        if let Some(normalized) = normalize_permission_mode(mode) {
+            return Some(normalized);
+        }
+    }
+
+    let workspace_path = workspace_path?;
+    let projects = value.get("projects").and_then(|v| v.as_table())?;
+    let mut best: Option<(usize, String)> = None;
+
+    for (project_path, project_config) in projects {
+        if !path_contains_workspace(project_path, workspace_path) {
+            continue;
+        }
+        let Some(trust_level) = project_config.get("trust_level").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let mode = match trust_level {
+            "trusted" => crate::constants::PERMISSION_MODE_BYPASS.to_string(),
+            "untrusted" => "default".to_string(),
+            other => match normalize_permission_mode(other) {
+                Some(mode) => mode,
+                None => continue,
+            },
+        };
+        let score = Path::new(project_path).components().count();
+        if best.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
+            best = Some((score, mode));
+        }
+    }
+
+    best.map(|(_, mode)| mode)
+}
+
+/// 判断 Codex project 配置是否覆盖当前 workspace。
+fn path_contains_workspace(project_path: &str, workspace_path: &str) -> bool {
+    let project = Path::new(project_path);
+    let workspace = Path::new(workspace_path);
+    workspace == project || workspace.starts_with(project)
+}
+
+/// Codex config.toml 的候选路径，CODEX_HOME 优先。
+fn codex_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(codex_home) = std::env::var("CODEX_HOME") {
+        if !codex_home.trim().is_empty() {
+            paths.push(PathBuf::from(codex_home).join("config.toml"));
+        }
+    }
+    paths.push(home_path(".codex/config.toml"));
+    paths.push(home_path(".config/codex/config.toml"));
+    paths.dedup();
+    paths
 }
 
 /// 执行 `which <command>` 获取 binary 绝对路径。
@@ -633,6 +747,62 @@ mod tests {
         unsafe {
             std::env::remove_var("OPENAI_MODEL");
         }
+    }
+
+    #[test]
+    fn codex_permission_normalizes_full_access_variants() {
+        assert_eq!(
+            normalize_permission_mode("danger-full-access").as_deref(),
+            Some(crate::constants::PERMISSION_MODE_BYPASS)
+        );
+        assert_eq!(
+            normalize_permission_mode("bypassPermissions").as_deref(),
+            Some(crate::constants::PERMISSION_MODE_BYPASS)
+        );
+        assert_eq!(
+            normalize_permission_mode("workspace_write").as_deref(),
+            Some("workspace-write")
+        );
+    }
+
+    #[test]
+    fn codex_permission_reads_sandbox_mode_from_config() {
+        let config = r#"
+sandbox_mode = "danger-full-access"
+"#;
+        assert_eq!(
+            codex_permission_mode_from_config(config, Some("/tmp/project")).as_deref(),
+            Some(crate::constants::PERMISSION_MODE_BYPASS)
+        );
+    }
+
+    #[test]
+    fn codex_permission_reads_trusted_project_from_config() {
+        let config = r#"
+[projects."/Users/dev/checkpoint"]
+trust_level = "trusted"
+"#;
+        assert_eq!(
+            codex_permission_mode_from_config(config, Some("/Users/dev/checkpoint/crates/core"))
+                .as_deref(),
+            Some(crate::constants::PERMISSION_MODE_BYPASS)
+        );
+    }
+
+    #[test]
+    fn codex_permission_uses_most_specific_project_config() {
+        let config = r#"
+[projects."/Users/dev"]
+trust_level = "trusted"
+
+[projects."/Users/dev/checkpoint"]
+trust_level = "untrusted"
+"#;
+        assert_eq!(
+            codex_permission_mode_from_config(config, Some("/Users/dev/checkpoint/crates/core"))
+                .as_deref(),
+            Some("default")
+        );
     }
 
     #[test]
