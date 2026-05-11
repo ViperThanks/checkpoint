@@ -46,10 +46,10 @@ function renderHooks() {
   var g = S.hooks.global || {};
   var agents = S.hooks.agents || [];
 
-  var html = '<div class="section">';
+  var html = '<div class="hook-page">';
 
   // 全局 PreToolUse 评估开关
-  html += '<div class="card">';
+  html += '<div class="card hook-card">';
   html += '<div class="card-header"><h3>Hook Control</h3></div>';
   html += '<div class="card-body">';
   html += '<div class="setting-row">';
@@ -70,17 +70,17 @@ function renderHooks() {
     var statusBadge = renderHookStatusBadge(agent.status);
     var details = agent.event_details || [];
 
-    html += '<div class="card" style="margin-bottom:12px">';
+    html += '<div class="card hook-card">';
 
     // Agent 头部行：label + status badge + legacy warning + enabled toggle
-    html += '<div class="card-header" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
-    html += '<h3 style="margin:0">' + escHtml(agent.label || agent.agent) + '</h3> ';
+    html += '<div class="card-header hook-agent-head">';
+    html += '<h3>' + escHtml(agent.label || agent.agent) + '</h3> ';
     html += statusBadge;
     if (agent.legacy_present) {
       html += ' <span class="badge badge-warn" title="Legacy hook entries found">⚠ Legacy</span>';
     }
-    html += '<span style="flex:1"></span>';
-    html += '<span class="setting-label" style="font-size:12px">Enabled</span> ';
+    html += '<span class="hook-head-spacer"></span>';
+    html += '<span class="setting-label hook-enabled-label">Enabled</span> ';
     html += '<button class="btn btn-sm ' + (agent.enabled ? 'btn-success' : 'btn-secondary') + '" onclick="toggleAgent(\'' + agent.agent + '\',\'enabled\',' + !agent.enabled + ')">' + (agent.enabled ? 'ON' : 'OFF') + '</button>';
     html += '</div>';
 
@@ -88,15 +88,16 @@ function renderHooks() {
 
     // 矩阵表
     if (details.length > 0) {
-      html += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px">';
-      html += '<thead><tr style="border-bottom:1px solid var(--border,#333);text-align:left">';
-      html += '<th style="padding:4px 8px">Event</th>';
-      html += '<th style="padding:4px 8px">阶段</th>';
-      html += '<th style="padding:4px 8px;text-align:center">已安装</th>';
-      html += '<th style="padding:4px 8px;text-align:center">配置</th>';
-      html += '<th style="padding:4px 8px">策略</th>';
-      html += '<th style="padding:4px 8px;text-align:center">必需</th>';
-      html += '<th style="padding:4px 8px;text-align:center">阻断</th>';
+      html += '<div class="hook-table-wrap">';
+      html += '<table class="hook-matrix">';
+      html += '<thead><tr>';
+      html += '<th>Event</th>';
+      html += '<th>阶段</th>';
+      html += '<th class="hook-cell-center">已安装</th>';
+      html += '<th class="hook-cell-center">配置</th>';
+      html += '<th>策略</th>';
+      html += '<th class="hook-cell-center">必需</th>';
+      html += '<th class="hook-cell-center">阻断</th>';
       html += '</tr></thead>';
       html += '<tbody>';
 
@@ -116,22 +117,22 @@ function renderHooks() {
         var requiredText = d.required ? 'Yes' : '—';
         var blockingText = d.blocking ? 'Yes' : '—';
 
-        html += '<tr style="border-bottom:1px solid var(--border-subtle,#222)">';
-        html += '<td style="padding:4px 8px"><span class="monospace" style="font-size:12px">' + escHtml(d.event || '') + '</span></td>';
-        html += '<td style="padding:4px 8px"><span class="badge ' + phaseStyle + '" style="font-size:11px">' + escHtml(phaseLabel) + '</span></td>';
-        html += '<td style="padding:4px 8px;text-align:center">' + installedIcon + '</td>';
-        html += '<td style="padding:4px 8px;text-align:center">' + configToggle + '</td>';
-        html += '<td style="padding:4px 8px"><span class="monospace" style="font-size:11px;color:var(--dim)">' + escHtml(strategyText) + '</span></td>';
-        html += '<td style="padding:4px 8px;text-align:center">' + requiredText + '</td>';
-        html += '<td style="padding:4px 8px;text-align:center">' + blockingText + '</td>';
+        html += '<tr>';
+        html += '<td><span class="monospace hook-event-name">' + escHtml(d.event || '') + '</span></td>';
+        html += '<td><span class="badge ' + phaseStyle + '">' + escHtml(phaseLabel) + '</span></td>';
+        html += '<td class="hook-cell-center">' + installedIcon + '</td>';
+        html += '<td class="hook-cell-center">' + configToggle + '</td>';
+        html += '<td><span class="monospace hook-strategy">' + escHtml(strategyText) + '</span></td>';
+        html += '<td class="hook-cell-center">' + requiredText + '</td>';
+        html += '<td class="hook-cell-center">' + blockingText + '</td>';
         html += '</tr>';
       }
 
-      html += '</tbody></table>';
+      html += '</tbody></table></div>';
     } else {
       // fallback：无 event_details 时显示旧格式
       if (agent.installed_events && agent.installed_events.length > 0) {
-        html += '<div style="font-size:12px;color:var(--text-muted,#888)">已安装: ' + agent.installed_events.join(', ') + '</div>';
+        html += '<div class="hook-muted-line">已安装: ' + agent.installed_events.join(', ') + '</div>';
       }
       if (agent.missing_events && agent.missing_events.length > 0) {
         html += '<div style="font-size:12px" class="text-warn">缺失: ' + agent.missing_events.join(', ') + '</div>';
@@ -139,11 +140,11 @@ function renderHooks() {
     }
 
     // 配置路径（折叠）
-    html += '<details style="margin-top:6px;font-size:12px;color:var(--text-muted,#888)">';
-    html += '<summary style="cursor:pointer">配置路径</summary>';
-    html += '<div style="margin-top:4px" class="monospace">' + escHtml(agent.config_path || '') + ' ' + (agent.config_exists ? '(exists)' : '(missing)') + '</div>';
+    html += '<details class="hook-config-paths">';
+    html += '<summary>配置路径</summary>';
+    html += '<div class="monospace hook-config-value">' + escHtml(agent.config_path || '') + ' ' + (agent.config_exists ? '(exists)' : '(missing)') + '</div>';
     if (agent.commands && agent.commands.length > 0) {
-      html += '<div style="margin-top:2px" class="monospace">' + escHtml(agent.commands[0]) + '</div>';
+      html += '<div class="monospace hook-config-value">' + escHtml(agent.commands[0]) + '</div>';
     }
     html += '</details>';
 
@@ -151,7 +152,7 @@ function renderHooks() {
   }
 
   // 全局 Reconcile 按钮
-  html += '<div class="card">';
+  html += '<div class="card hook-card">';
   html += '<div class="card-body">';
   html += '<button class="btn btn-primary" onclick="reconcileHooks()">Reconcile Hooks</button>';
   html += '<span class="setting-hint" style="margin-left:8px">同步所有 agent hook 配置到当前状态</span>';

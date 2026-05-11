@@ -79,9 +79,7 @@ fn main() {
             let view_menu = SubmenuBuilder::new(app, "View")
                 .item(&toggle_theme_item)
                 .build()?;
-            let menu = MenuBuilder::new(app)
-                .item(&view_menu)
-                .build()?;
+            let menu = MenuBuilder::new(app).item(&view_menu).build()?;
             app.set_menu(menu)?;
 
             // Handle menu events

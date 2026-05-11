@@ -121,21 +121,21 @@
 /* ===== Light Mode ===== */
 [data-theme="light"] {
   /* Soft graphite light mode: no pure white canvas, shared by bridge + relay. */
-  --bg:           #eef1f5;
-  --surface:      #e2e6ee;
-  --surface2:     #d5dbe6;
-  --surface3:     #c6cedb;
-  --surface-glass: rgba(226, 230, 238, 0.86);
+  --bg:           #f4f6f9;
+  --surface:      #edf1f6;
+  --surface2:     #e7ebf1;
+  --surface3:     #dce2ea;
+  --surface-glass: rgba(237, 241, 246, 0.88);
 
-  --text:         rgba(18, 22, 32, 0.94);
-  --text-secondary: rgba(18, 22, 32, 0.66);
-  --text-tertiary:  rgba(18, 22, 32, 0.42);
-  --dim:          rgba(18, 22, 32, 0.58);
-  --dimmer:       rgba(18, 22, 32, 0.36);
+  --text:         rgba(18, 22, 32, 0.90);
+  --text-secondary: rgba(18, 22, 32, 0.62);
+  --text-tertiary:  rgba(18, 22, 32, 0.38);
+  --dim:          rgba(18, 22, 32, 0.54);
+  --dimmer:       rgba(18, 22, 32, 0.32);
 
-  --border:       rgba(31, 38, 54, 0.16);
-  --border-hover: rgba(31, 38, 54, 0.30);
-  --separator-opaque: #c4ccd8;
+  --border:       rgba(31, 38, 54, 0.08);
+  --border-hover: rgba(31, 38, 54, 0.16);
+  --separator-opaque: #d3dae4;
 
   --accent:       #0a6ff2;
   --accent-hover: #005bd1;
