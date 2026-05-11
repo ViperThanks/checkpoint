@@ -978,6 +978,55 @@ function msgText(m) {
   return m ? (m.text || m.content || m.tool_input_preview || '') : '';
 }
 
+function extractThinkingParts(text, thinking) {
+  const rawText = String(text || '');
+  if (thinking) return { thinking: String(thinking || '').trim(), content: rawText.trim() };
+  const match = rawText.match(/<thinking>([\s\S]*?)<\/thinking>/);
+  if (!match) return { thinking: '', content: rawText };
+  return {
+    thinking: match[1].trim(),
+    content: rawText.replace(match[0], '').trim(),
+  };
+}
+
+function messageTimestampMs(m) {
+  if (!m || !m.timestamp) return null;
+  const t = Date.parse(m.timestamp);
+  return Number.isFinite(t) ? t : null;
+}
+
+function formatThinkingElapsed(ms) {
+  const totalSeconds = Math.max(1, Math.round(ms / 1000));
+  if (totalSeconds < 60) return totalSeconds + 's';
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return minutes + 'm' + (seconds ? ' ' + seconds + 's' : '');
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return hours + 'h' + (remainingMinutes ? ' ' + remainingMinutes + 'm' : '');
+}
+
+function thinkingSummaryLabel(message, anchorMessage) {
+  const end = messageTimestampMs(message);
+  const start = messageTimestampMs(anchorMessage);
+  if (start !== null && end !== null && end > start) {
+    return '思考了 ' + formatThinkingElapsed(end - start);
+  }
+  const parts = extractThinkingParts(msgText(message), message && message.thinking);
+  if (parts.thinking) return '思考过程';
+  return '';
+}
+
+function buildThinkingSummaryHtml(message, anchorMessage) {
+  const parts = extractThinkingParts(msgText(message), message && message.thinking);
+  if (!parts.thinking) return { thinkingHtml: '', content: parts.content };
+  const label = thinkingSummaryLabel(message, anchorMessage) || '思考过程';
+  return {
+    thinkingHtml: '<div class="chat-thinking-summary" title="思考过程已折叠">' + escHtml(label) + '</div>',
+    content: parts.content,
+  };
+}
+
 function isLocalMsg(m) {
   return !!(m && m._local_id);
 }
@@ -1100,6 +1149,7 @@ function buildRelayActivityHtml(messages) {
 
   for (var g = 0; g < groups.length; g++) {
     var group = groups[g];
+    var userAnchor = group.userSeg ? group.userSeg.message : null;
     if (group.userSeg) html += buildConvMessageHtml(group.userSeg.message);
 
     var runs = buildToolRuns(group);
@@ -1112,7 +1162,7 @@ function buildRelayActivityHtml(messages) {
       for (; segCursor < group.segments.length; segCursor++) {
         var seg = group.segments[segCursor];
         if (seg.type === 'assistant') {
-          html += buildConvMessageHtml(seg.message);
+          html += buildConvMessageHtml(seg.message, userAnchor);
         } else if (seg.type === 'user') {
           continue;
         } else {
@@ -1142,7 +1192,7 @@ function buildRelayActivityHtml(messages) {
       for (; segCursor < group.segments.length; segCursor++) {
         var after = group.segments[segCursor];
         if (after.type === 'assistant') {
-          html += buildConvMessageHtml(after.message);
+          html += buildConvMessageHtml(after.message, userAnchor);
         } else if (after.type === 'user') {
           continue;
         } else {
@@ -1155,14 +1205,14 @@ function buildRelayActivityHtml(messages) {
     for (; segCursor < group.segments.length; segCursor++) {
       var tail = group.segments[segCursor];
       if (tail.type === 'assistant') {
-        html += buildConvMessageHtml(tail.message);
+        html += buildConvMessageHtml(tail.message, userAnchor);
       }
     }
   }
   return html;
 }
 
-function buildConvMessageHtml(m) {
+function buildConvMessageHtml(m, anchorMessage) {
   const role = m.role || 'unknown';
   const text = m.text || m.content || m.tool_input_preview || '';
   if (role === 'tool_summary') {
@@ -1174,10 +1224,15 @@ function buildConvMessageHtml(m) {
   const mine = role === 'user';
   const cls = mine ? 'user' : 'assistant';
   const label = mine ? '你' : 'Agent';
+  const rendered = mine
+    ? { thinkingHtml: '', content: text }
+    : buildThinkingSummaryHtml(m, anchorMessage);
+  const content = mine ? text : rendered.content;
   return '<div class="chat-msg ' + cls + '">' +
     '<div class="chat-bubble">' +
       '<div class="chat-role">' + label + '</div>' +
-      '<div class="chat-text md-render">' + renderMd(text) + '</div>' +
+      rendered.thinkingHtml +
+      (content ? '<div class="chat-text md-render">' + renderMd(content) + '</div>' : '') +
     '</div></div>';
 }
 
@@ -1656,6 +1711,9 @@ if (typeof module !== 'undefined' && module.exports) {
     shouldRenewToken,
     shouldRunHeavyPoll,
     relayAuthErrorMessage,
+    extractThinkingParts,
+    formatThinkingElapsed,
+    thinkingSummaryLabel,
   };
 }
 

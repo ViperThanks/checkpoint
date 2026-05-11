@@ -6,7 +6,14 @@
 const { buildNewJobBody, buildContinueJobBody } = require('../../../shared_ui/job_body.js');
 const { shortId, escHtml, jsStr } = require('../../../shared_ui/view_model.js');
 const { runtimeAlertCard, runtimeHealthBadge } = require('../../../shared_ui/runtime_health.js');
-const { parseJwtExpMs, shouldRenewToken, shouldRunHeavyPoll, relayAuthErrorMessage } = require('./app.js');
+const {
+  parseJwtExpMs,
+  shouldRenewToken,
+  shouldRunHeavyPoll,
+  relayAuthErrorMessage,
+  extractThinkingParts,
+  thinkingSummaryLabel,
+} = require('./app.js');
 
 // ---- Test runner ----
 
@@ -244,6 +251,28 @@ console.log('mobile session lifecycle helpers');
   assertEqual(relayAuthErrorMessage('token_replayed'), '配对已失效，请重新连接', 'token_replayed has actionable message');
   assertEqual(relayAuthErrorMessage('wrong_token_role'), 'Token 类型错误，请使用 Client Token', 'wrong role message mentions client token');
   assertEqual(relayAuthErrorMessage('token_expired'), 'Token 已过期，请重新连接', 'expired token message asks reconnect');
+})();
+
+(function test_extract_thinking_from_structured_field() {
+  var parts = extractThinkingParts('最终结论', '先分析问题');
+  assertEqual(parts.thinking, '先分析问题', 'structured thinking is preserved');
+  assertEqual(parts.content, '最终结论', 'content remains final answer');
+})();
+
+(function test_extract_thinking_from_tag() {
+  var parts = extractThinkingParts('<thinking>先分析\n再验证</thinking>\n结论', '');
+  assertEqual(parts.thinking, '先分析\n再验证', 'tag thinking extracted');
+  assertEqual(parts.content, '结论', 'tag thinking removed from content');
+})();
+
+(function test_thinking_summary_uses_elapsed_time() {
+  var user = { timestamp: '2026-05-11T12:00:00Z' };
+  var assistant = {
+    timestamp: '2026-05-11T12:02:05Z',
+    text: '结论',
+    thinking: '分析过程',
+  };
+  assertEqual(thinkingSummaryLabel(assistant, user), '思考了 2m 5s', 'summary uses elapsed time');
 })();
 
 // ---- Summary ----
