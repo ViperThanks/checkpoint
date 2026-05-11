@@ -193,8 +193,8 @@ impl ProviderRegistry {
                 supports_stop: true,
                 supports_transcript: true,
                 supports_native_timeout: false,
-                supports_permission_passthrough: false,
-                permission_mode_cli_arg: None,
+                supports_permission_passthrough: true,
+                permission_mode_cli_arg: Some("--dangerously-bypass-approvals-and-sandbox".into()),
                 permission_mode_env_vars: vec![],
             },
         );

@@ -121,11 +121,11 @@ When a session is started with `bypassPermissions` mode, the bridge injects prov
 
 Permission passthrough is **capability-driven**: each provider declares `supports_permission_passthrough`, `permission_mode_cli_arg`, and `permission_mode_env_vars` in its `ProviderConfig`. The bridge reads these fields at command-build time — there are no hardcoded per-provider branches.
 
-Currently verified for Claude Code only:
-- CLI: `--dangerously-skip-permissions`
-- Env: `VIBE_ISLAND_SKIP=1`
+Currently wired:
+- Claude Code: CLI `--dangerously-skip-permissions`, env `VIBE_ISLAND_SKIP=1`
+- Codex CLI: CLI `--dangerously-bypass-approvals-and-sandbox`
 
-Other providers (Codex CLI, Kimi Code) have `supports_permission_passthrough = false` and silently ignore the stored permission mode.
+Other providers (Kimi Code) have `supports_permission_passthrough = false` and silently ignore the stored permission mode.
 
 ## What Agent Aspect Does Not Do
 

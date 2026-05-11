@@ -163,7 +163,7 @@ All fields are optional. Unset fields inherit the built-in default for that prov
 | `permission_mode_cli_arg` | string? | CLI arg injected when bypass mode is active (e.g. `"--dangerously-skip-permissions"`). |
 | `permission_mode_env_vars` | [(string, string)] | Env vars set when bypass mode is active (e.g. `[["VIBE_ISLAND_SKIP", "1"]]`). |
 
-Permission passthrough fields are currently verified for Claude Code only. Other providers (Codex CLI, Kimi Code) default to disabled.
+Permission passthrough fields are currently wired for Claude Code and Codex CLI. Kimi Code defaults to disabled.
 
 ## Hook Strategy Config v2
 

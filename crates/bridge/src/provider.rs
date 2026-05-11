@@ -419,6 +419,27 @@ mod tests {
     }
 
     #[test]
+    fn codex_builtin_bypass_permission_mode_adds_bypass_flag() {
+        let registry = make_registry();
+        let cmd = build_agent_command(
+            "/usr/bin/codex",
+            "codex_cli",
+            "/tmp/proj",
+            Some("tid"),
+            "fix",
+            Some(agent_aspect_core::constants::PERMISSION_MODE_BYPASS),
+            &registry,
+        )
+        .unwrap();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+    }
+
+    #[test]
     fn kimi_bypass_permission_mode_uses_provider_config() {
         let registry =
             make_registry_with_permission_passthrough("kimi_code", "--unsafe", "KIMI_UNSAFE", "1");
