@@ -778,9 +778,9 @@ function extractThinking(text) {
 
 function buildThinkingHtml(thinking, idx) {
   if (!thinking) return '';
-  // Generate a brief summary: count lines or just show "已思考"
+  // Generate a brief summary for the collapsed reasoning block.
   const lines = thinking.split('\n').filter(l => l.trim()).length;
-  const summary = lines > 1 ? '已思考 ' + lines + ' 步' : '思考过程';
+  const summary = lines > 1 ? '思考 ' + lines + ' 步' : '思考过程';
   const id = 'thinking-' + idx;
   return '<div class="chat-thinking" id="' + id + '">' +
     '<div class="chat-thinking-bar" onclick="toggleThinking(\'' + id + '\')">' +
@@ -949,7 +949,11 @@ function loadOlderMessages() {
       if (m.role === 'user') {
         html += '<div class="chat-row chat-row-user"><div class="chat-msg chat-user"><div class="chat-role-row"><span class="chat-role">你</span>' + ts + '</div><div class="chat-text md-render">' + renderMd(m.text) + '</div></div></div>';
       } else if (m.role === 'assistant') {
-        html += '<div class="chat-row chat-row-assistant"><div class="chat-msg chat-assistant"><div class="chat-role-row"><span class="chat-role">助手</span>' + ts + '</div><div class="chat-text md-render">' + renderMd(m.text) + '</div></div></div>';
+        const t = m.thinking ? { thinking: m.thinking, content: m.text || '' } : extractThinking(m.text);
+        const messageId = m.seq || idx || Math.random().toString(36).slice(2, 8);
+        const thinkingHtml = buildThinkingHtml(t.thinking, 'older-' + messageId);
+        const contentHtml = t.content ? '<div class="chat-text md-render">' + renderMd(t.content) + '</div>' : '';
+        html += '<div class="chat-row chat-row-assistant"><div class="chat-msg chat-assistant"><div class="chat-role-row"><span class="chat-role">助手</span>' + ts + '</div>' + thinkingHtml + contentHtml + '</div></div>';
       } else if (m.role === 'tool_summary') {
         const hasFull = m.tool_input_full && m.tool_input_full !== m.tool_input_preview;
         html += '<div class="chat-row chat-row-tool"><div class="chat-msg chat-tool"><div class="chat-tool-line">' +

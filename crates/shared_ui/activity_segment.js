@@ -6,7 +6,7 @@
 // 核心概念：
 // - Segment：一组连续同类工具事件的合并
 // - Turn：两个用户消息之间的所有活动（assistant + tools）
-// - 完成态："工作 Xm Ys" 折叠
+// - 完成态："耗时 Xm Ys" 折叠
 // - 运行中态：实时累积摘要 + 脉冲指示
 //
 // 依赖：view_model.js (escHtml, jsStr)
@@ -19,7 +19,7 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 
 // ============================================================
-// Tool 分类 + 中文显示名
+// Tool 分类 + 显示名
 // ============================================================
 
 /**
@@ -61,7 +61,7 @@ var TOOL_MAP = {
 };
 
 /**
- * 工具技术名 → 中文显示名。未列出时回退到原 tool_name。
+ * 工具技术名 → 显示名。未列出时回退到原 tool_name。
  */
 var DISPLAY_NAMES = {
   'Read': '读取文件', 'LS': '列出目录', 'LSP': 'LSP',
@@ -196,7 +196,7 @@ function formatDuration(ms) {
  * - 编辑 + 文件/搜索（无命令）→ 修改文件
  */
 var PHASE_LABELS = {
-  'understand': '理解任务',
+  'understand': '理解上下文',
   'diagnose':   '检查状态',
   'execute':    '执行命令',
   'edit':       '修改文件',
@@ -231,26 +231,15 @@ function classifyTurnPhase(segments) {
  */
 function turnBannerLabel(group) {
   var html = '';
+  var durStr = formatDuration(group.duration || 1);
   if (group.isRunning) {
     html += '<span class="act-pulse"></span>';
-    html += '<span class="act-turn-label">工作中 ' + formatDuration(group.duration || 1) + '</span>';
+    html += '<span class="act-turn-label">处理中' + (durStr ? ' ' + durStr : '') + '</span>';
   } else {
-    // 获取阶段标签
-    var toolSegs = [];
-    for (var i = 0; i < group.segments.length; i++) {
-      var s = group.segments[i];
-      if (s.type !== 'user' && s.type !== 'assistant') toolSegs.push(s);
-    }
-    var phase = classifyTurnPhase(toolSegs);
-    var phaseLabel = phase ? (PHASE_LABELS[phase] || '') : '';
-    var durStr = formatDuration(group.duration || 1);
-    var parts = [];
-    if (phaseLabel) parts.push(phaseLabel);
-    if (durStr) parts.push(durStr);
-    html += '<span class="act-turn-label">' + (phaseLabel ? parts.join(' · ') : '工作 ' + parts.join(' · ')) + '</span>';
+    html += '<span class="act-turn-label">耗时' + (durStr ? ' ' + durStr : '') + '</span>';
   }
   if (group.toolCount > 0) {
-    html += '<span class="act-turn-tools">' + group.toolCount + ' 个动作</span>';
+    html += '<span class="act-turn-tools">' + group.toolCount + ' 次操作</span>';
   }
   return html;
 }
@@ -341,8 +330,8 @@ function _finalizeSeg(p) {
     } else {
       // 多操作：分类计数
       var countParts = [];
-      if (c.file > 0) countParts.push('查看 ' + c.file + ' 个文件');
-      if (c.search > 0) countParts.push(c.search + ' 次搜索');
+      if (c.file > 0) countParts.push('读取 ' + c.file + ' 个文件');
+      if (c.search > 0) countParts.push('搜索 ' + c.search + ' 次');
       if (c.command > 0) countParts.push('运行 ' + c.command + ' 条命令');
       summary = countParts.join(' · ');
     }
@@ -382,7 +371,7 @@ function _singleToolSeg(m) {
     endTime: m.timestamp,
     duration: 0,
     fileCount: 0, searchCount: 0, commandCount: 0, editCount: 0,
-    summary: m.tool_name || '工具'
+    summary: m.tool_name || 'tool'
   };
 }
 
@@ -578,7 +567,7 @@ function renderSegmentDetail(seg) {
 
 /**
  * 渲染 Turn 组的完整标题栏 + 段卡片。
- * 使用 turnBannerLabel 生成统一的中文标签（含工作阶段）。
+ * 使用 turnBannerLabel 生成统一的标签。
  */
 function renderTurnBanner(group, idx) {
   if (!group.toolCount && group.segments.length === 0) return '';

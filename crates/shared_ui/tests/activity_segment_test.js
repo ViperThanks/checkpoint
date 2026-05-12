@@ -360,9 +360,9 @@ var settledGroup = {
 };
 html = as.renderTurnBanner(settledGroup, 0);
 assert(html.indexOf('act-settled') >= 0, 'settled: has act-settled');
-assert(html.indexOf('理解任务') >= 0 || html.indexOf('工作') >= 0, 'settled: has phase or 工作 label');
+assert(html.indexOf('耗时') >= 0, 'settled: has duration label');
 assert(html.indexOf('3m 21s') >= 0, 'settled: has duration');
-assert(html.indexOf('2 个动作') >= 0, 'settled: has action count');
+assert(html.indexOf('2 次操作') >= 0, 'settled: has action count');
 assert(html.indexOf('toggleTurnBody') >= 0, 'settled: has toggle');
 assert(html.indexOf('toggleTurnBody(this)') >= 0, 'turn toggle is element-local');
 
@@ -382,7 +382,7 @@ var runningGroup = {
 html = as.renderTurnBanner(runningGroup, 1);
 assert(html.indexOf('act-running') >= 0, 'running: has act-running');
 assert(html.indexOf('act-pulse') >= 0, 'running: has pulse indicator');
-assert(html.indexOf('工作中') >= 0, 'running: has 工作中');
+assert(html.indexOf('处理中') >= 0, 'running: has running label');
 assert(html.indexOf('toggleTurnBody') < 0, 'running: no toggle on banner');
 
 // ============================================================
@@ -572,7 +572,7 @@ assert(detailHtml.indexOf('act-item') >= 0, 'detail: has act-item class');
 // renderTurnBanner — 中文标签
 // ============================================================
 
-console.log('renderTurnBanner Chinese labels');
+console.log('renderTurnBanner compact labels');
 var cnGroup = {
   segments: [],
   startTime: '2026-05-01T10:00:00Z',
@@ -582,9 +582,10 @@ var cnGroup = {
   toolCount: 7,
 };
 html = as.renderTurnBanner(cnGroup, 0);
-assert(html.indexOf('工作') >= 0, 'Chinese: has 工作');
+assert(html.indexOf('耗时') >= 0, 'compact: has 耗时');
+assert(html.indexOf('工作') === -1, 'compact: avoids 工作 wording');
 assert(html.indexOf('5m 30s') >= 0, 'Chinese: has duration');
-assert(html.indexOf('7 个动作') >= 0, 'Chinese: has action count');
+assert(html.indexOf('7 次操作') >= 0, 'Chinese: has action count');
 
 var cnRunning = {
   segments: [],
@@ -595,9 +596,10 @@ var cnRunning = {
   toolCount: 3,
 };
 html = as.renderTurnBanner(cnRunning, 1);
-assert(html.indexOf('工作中') >= 0, 'Chinese running: has 工作中');
+assert(html.indexOf('处理中') >= 0, 'Chinese running: has 处理中');
+assert(html.indexOf('工作') === -1, 'Chinese running: avoids 工作 wording');
 assert(html.indexOf('15s') >= 0, 'Chinese running: has duration');
-assert(html.indexOf('3 个动作') >= 0, 'Chinese running: has action count');
+assert(html.indexOf('3 次操作') >= 0, 'Chinese running: has action count');
 
 // ============================================================
 // Summary masking — 折叠摘要不泄露敏感值
@@ -691,8 +693,8 @@ var exploreSegs = as.buildSegments([
 ]);
 var exploreGroups = as.buildTurnGroups(exploreSegs, false);
 html = as.renderTurnBanner(exploreGroups[0], 0);
-assert(html.indexOf('理解任务') >= 0, 'explore turn: has 理解任务 phase');
-assert(html.indexOf('工作 理解任务') === -1, 'explore turn: no redundant 工作 prefix when phase present');
+assert(html.indexOf('耗时') >= 0, 'explore turn: has compact duration label');
+assert(html.indexOf('工作') === -1, 'explore turn: avoids 工作 wording');
 
 var editPhaseSegs = as.buildSegments([
   { role: 'user', text: 'fix it', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
@@ -700,7 +702,7 @@ var editPhaseSegs = as.buildSegments([
 ]);
 var editGroups = as.buildTurnGroups(editPhaseSegs, false);
 html = as.renderTurnBanner(editGroups[0], 0);
-assert(html.indexOf('修改文件') >= 0, 'edit turn: has 修改文件 phase');
+assert(html.indexOf('耗时') >= 0, 'edit turn: has compact duration label');
 
 var verifySegs = as.buildSegments([
   { role: 'user', text: 'fix and test', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
@@ -709,13 +711,13 @@ var verifySegs = as.buildSegments([
 ]);
 var verifyGroups = as.buildTurnGroups(verifySegs, false);
 html = as.renderTurnBanner(verifyGroups[0], 0);
-assert(html.indexOf('验证结果') >= 0, 'edit+command turn: has 验证结果 phase');
+assert(html.indexOf('耗时') >= 0, 'edit+command turn: has compact duration label');
 
 // ============================================================
-// Integration: no "Worked for" or "Ran " in turn output
+// Integration: no awkward "工作" wording in turn output
 // ============================================================
 
-console.log('integration: no English banners');
+console.log('integration: compact Chinese banners');
 var integrationMsgs = [
   { role: 'user', text: 'fix bug', timestamp: '2026-05-01T10:00:00Z', seq: 1 },
   { role: 'tool_summary', tool_name: 'Read', tool_input_preview: 'src/lib.rs', timestamp: '2026-05-01T10:00:01Z', seq: 2 },
@@ -727,15 +729,17 @@ var intGroups = as.buildTurnGroups(intSegs, false);
 html = as.renderTurnBanner(intGroups[0], 0);
 assert(html.indexOf('Worked for') === -1, 'integration: no "Worked for"');
 assert(html.indexOf('Ran ') === -1, 'integration: no "Ran "');
-assert(html.indexOf('验证结果') >= 0, 'integration: has phase label');
-assert(html.indexOf('个动作') >= 0, 'integration: has 个动作');
+assert(html.indexOf('工作') === -1, 'integration: no 工作 wording');
+assert(html.indexOf('耗时') >= 0, 'integration: has 耗时 label');
+assert(html.indexOf('次操作') >= 0, 'integration: has 次操作');
 
 // turnBannerLabel 也不含英文
 var labelHtml = as.turnBannerLabel(intGroups[0]);
 assert(labelHtml.indexOf('Worked for') === -1, 'turnBannerLabel: no "Worked for"');
 assert(labelHtml.indexOf('Ran ') === -1, 'turnBannerLabel: no "Ran "');
-assert(labelHtml.indexOf('验证结果') >= 0, 'turnBannerLabel: has phase label');
-assert(labelHtml.indexOf('个动作') >= 0, 'turnBannerLabel: has 个动作');
+assert(labelHtml.indexOf('工作') === -1, 'turnBannerLabel: no 工作 wording');
+assert(labelHtml.indexOf('耗时') >= 0, 'turnBannerLabel: has 耗时 label');
+assert(labelHtml.indexOf('次操作') >= 0, 'turnBannerLabel: has 次操作');
 
 // ============================================================
 // buildToolRuns — 基本切分
@@ -773,21 +777,19 @@ assert(!runs[1].isRunning, 'run 2: not running');
 
 console.log('buildToolRuns per-run counts');
 var label1 = as.turnBannerLabel(runs[0]);
-assert(label1.indexOf('3 个动作') >= 0, 'run 1 banner: shows 3 个动作');
+assert(label1.indexOf('3 次操作') >= 0, 'run 1 banner: shows 3 次操作');
 assert(label1.indexOf('4') === -1, 'run 1 banner: no total 4');
 
 var label2 = as.turnBannerLabel(runs[1]);
-assert(label2.indexOf('1 个动作') >= 0, 'run 2 banner: shows 1 个动作');
+assert(label2.indexOf('1 次操作') >= 0, 'run 2 banner: shows 1 次操作');
 
 // ============================================================
 // buildToolRuns — 独立阶段标签
 // ============================================================
 
 console.log('buildToolRuns phase labels');
-// run 1: only file reads + search → 理解任务
-assert(label1.indexOf('理解任务') >= 0, 'run 1: phase is 理解任务');
-// run 2: only edit → 修改文件
-assert(label2.indexOf('修改文件') >= 0, 'run 2: phase is 修改文件');
+assert(label1.indexOf('耗时') >= 0, 'run 1: compact duration label');
+assert(label2.indexOf('耗时') >= 0, 'run 2: compact duration label');
 
 // ============================================================
 // buildToolRuns — 空 group / 无工具
@@ -845,11 +847,11 @@ assert(runRuns2[0].isRunning, 'running: run inherits isRunning');
 console.log('buildToolRuns render defaults');
 var banner1 = as.renderTurnBanner(runs[0], 'tr0');
 assert(banner1.indexOf('display:none') >= 0, 'run 1 banner: body is display:none');
-assert(banner1.indexOf('3 个动作') >= 0, 'run 1 banner: has 3 个动作');
+assert(banner1.indexOf('3 次操作') >= 0, 'run 1 banner: has 3 次操作');
 
 var banner2 = as.renderTurnBanner(runs[1], 'tr1');
 assert(banner2.indexOf('display:none') >= 0, 'run 2 banner: body is display:none');
-assert(banner2.indexOf('1 个动作') >= 0, 'run 2 banner: has 1 个动作');
+assert(banner2.indexOf('1 次操作') >= 0, 'run 2 banner: has 1 次操作');
 
 // ============================================================
 // buildToolRuns — user→3 tools→assistant→1 tool→assistant 完整场景
@@ -877,8 +879,8 @@ assertEq(fRuns[1].toolCount, 1, 'full: run 2 has 1 tool');
 // Banner labels show per-run counts
 var fl1 = as.turnBannerLabel(fRuns[0]);
 var fl2 = as.turnBannerLabel(fRuns[1]);
-assert(fl1.indexOf('3 个动作') >= 0, 'full: run 1 shows 3 个动作');
-assert(fl2.indexOf('1 个动作') >= 0, 'full: run 2 shows 1 个动作');
+assert(fl1.indexOf('3 次操作') >= 0, 'full: run 1 shows 3 次操作');
+assert(fl2.indexOf('1 次操作') >= 0, 'full: run 2 shows 1 次操作');
 // Must NOT show total 4
 assert(fl1.indexOf('4') === -1, 'full: run 1 does not show total 4');
 assert(fl2.indexOf('4') === -1, 'full: run 2 does not show total 4');
