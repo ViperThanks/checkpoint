@@ -928,12 +928,8 @@ fn format_tool_summary(tool_name: &str, input: &serde_json::Value) -> String {
             .map(|s| s.to_string())
             .unwrap_or_default(),
         "Grep" => {
-            let pattern = obj
-                .and_then(|o| o.get("pattern").and_then(|v| v.as_str()))
-                .unwrap_or("");
-            let path = obj
-                .and_then(|o| o.get("path").and_then(|v| v.as_str()))
-                .unwrap_or("");
+            let pattern = string_field(obj, &["pattern", "query", "q"]).unwrap_or("");
+            let path = string_field(obj, &["path", "include"]).unwrap_or("");
             if path.is_empty() {
                 pattern.to_string()
             } else {
@@ -941,13 +937,18 @@ fn format_tool_summary(tool_name: &str, input: &serde_json::Value) -> String {
             }
         }
         "Glob" => obj
-            .and_then(|o| o.get("pattern").and_then(|v| v.as_str()))
+            .and_then(|o| string_field(Some(o), &["pattern", "path"]))
             .map(|s| s.to_string())
             .unwrap_or_default(),
-        "Bash" | "shell" | "Shell" | "exec_command" | "write_stdin" | "run_shell_command" => obj
-            .and_then(|o| o.get("command").and_then(|v| v.as_str()))
+        "Bash" | "shell" | "Shell" | "exec_command" | "run_shell_command" => {
+            string_field(obj, &["command", "cmd"])
+                .map(|s| s.to_string())
+                .unwrap_or_default()
+        }
+        "write_stdin" => string_field(obj, &["chars", "input", "stdin"])
             .map(|s| s.to_string())
             .unwrap_or_default(),
+        "WebSearch" | "web_search" | "search_query" | "image_query" => format_search_summary(input),
         "Write" | "Edit" | "StrReplaceFile" | "WriteFile" | "write_file" | "ApplyPatch" => obj
             .and_then(|o| {
                 o.get("file_path")
@@ -970,6 +971,45 @@ fn format_tool_summary(tool_name: &str, input: &serde_json::Value) -> String {
             crate::constants::TOOL_SUMMARY_PREVIEW_LEN,
         ),
     }
+}
+
+fn string_field<'a>(
+    obj: Option<&'a serde_json::Map<String, serde_json::Value>>,
+    keys: &[&str],
+) -> Option<&'a str> {
+    let obj = obj?;
+    keys.iter()
+        .find_map(|key| obj.get(*key).and_then(|v| v.as_str()))
+}
+
+fn format_search_summary(input: &serde_json::Value) -> String {
+    if let Some(obj) = input.as_object() {
+        if let Some(query) = string_field(Some(obj), &["q", "query", "search_query", "pattern"]) {
+            return query.to_string();
+        }
+        for key in ["search_query", "image_query", "queries"] {
+            if let Some(items) = obj.get(key).and_then(|v| v.as_array()) {
+                let queries: Vec<&str> = items
+                    .iter()
+                    .filter_map(|item| {
+                        item.get("q")
+                            .or_else(|| item.get("query"))
+                            .and_then(|v| v.as_str())
+                    })
+                    .collect();
+                if !queries.is_empty() {
+                    return truncate_str(
+                        &queries.join(" · "),
+                        crate::constants::TOOL_SUMMARY_PREVIEW_LEN,
+                    );
+                }
+            }
+        }
+    }
+    truncate_str(
+        &serde_json::to_string(input).unwrap_or_default(),
+        crate::constants::TOOL_SUMMARY_PREVIEW_LEN,
+    )
 }
 
 /// Parse a JSON string argument into a Value, or return the raw string as a fallback.
@@ -1076,6 +1116,40 @@ mod tests {
         assert_eq!(msgs[3].role, "assistant");
         assert_eq!(msgs[3].text, "Found the issue in the auth module.");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn codex_exec_command_uses_cmd_as_preview() {
+        let line = r#"{"timestamp":"2026-05-12T03:00:00Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"git status --short && git log -1 --oneline\",\"workdir\":\"/tmp/proj\"}"}}"#;
+        let msgs = parse_codex_line(line).unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].role, "tool_summary");
+        assert_eq!(msgs[0].tool_name.as_deref(), Some("exec_command"));
+        assert_eq!(
+            msgs[0].tool_input_preview.as_deref(),
+            Some("git status --short && git log -1 --oneline")
+        );
+    }
+
+    #[test]
+    fn codex_write_stdin_uses_chars_as_preview() {
+        let line = r#"{"timestamp":"2026-05-12T03:00:00Z","type":"response_item","payload":{"type":"function_call","name":"write_stdin","arguments":"{\"session_id\":1,\"chars\":\"q\\n\"}"}}"#;
+        let msgs = parse_codex_line(line).unwrap();
+        assert_eq!(msgs[0].tool_input_preview.as_deref(), Some("q\n"));
+    }
+
+    #[test]
+    fn search_query_array_uses_query_text_as_preview() {
+        let preview = format_tool_summary(
+            "search_query",
+            &serde_json::json!({
+                "search_query": [
+                    { "q": "Agent Aspect WKWebView" },
+                    { "q": "Codex CLI Full Access" }
+                ]
+            }),
+        );
+        assert_eq!(preview, "Agent Aspect WKWebView · Codex CLI Full Access");
     }
 
     #[test]
